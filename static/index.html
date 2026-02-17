@@ -3,29 +3,98 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PoliticalDebAIser</title>
+  <title>Debiaser</title>
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
+
+  <!-- History Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <h3>History</h3>
+      <button id="sidebar-close" class="sidebar-close" title="Close">&times;</button>
+    </div>
+    <div id="history-list" class="history-list"></div>
+    <div class="sidebar-footer">
+      <button id="clear-history" class="btn-clear-history">Clear All History</button>
+    </div>
+  </aside>
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
   <div class="container">
 
     <!-- Header -->
     <header>
-      <h1>PoliticalDebAIser</h1>
-      <p>Analyze any news article through 5 political archetype lenses and discover balanced insight.</p>
+      <div class="header-row">
+        <button id="sidebar-toggle" class="sidebar-toggle" title="History">
+          <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M1.5 3a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5z"/></svg>
+        </button>
+        <div>
+          <h1>Debiaser</h1>
+          <p>Paste a link or text. Personas analyse, the debiaser synthesises, and placement appears on a spectrum.</p>
+        </div>
+      </div>
     </header>
 
+    <!-- Input Tabs -->
+    <div class="input-tabs">
+      <button class="input-tab active" data-tab="url">URL</button>
+      <button class="input-tab" data-tab="text">Text</button>
+      <button class="input-tab" data-tab="compare">Compare</button>
+    </div>
+
     <!-- URL Input -->
-    <form id="analyze-form" class="input-area">
-      <input
-        type="text"
-        id="url-input"
-        placeholder="Paste an article URL here…"
-        autocomplete="off"
-        required
-      />
-      <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze</button>
-    </form>
+    <section class="input-section">
+      <form id="analyze-form" class="input-card">
+        <div class="input-card-row">
+          <div class="input-card-field">
+            <label class="input-label">Article URL</label>
+            <input
+              type="text"
+              id="url-input"
+              placeholder="https://example.com/article"
+              autocomplete="off"
+              required
+            />
+          </div>
+          <button type="submit" id="analyze-btn" class="btn btn-primary">Analyse</button>
+        </div>
+      </form>
+
+      <!-- Text Input -->
+      <div id="text-input-area" class="input-card text-input-card">
+        <label class="input-label">Or paste article text</label>
+        <input
+          type="text"
+          id="text-title-input"
+          class="text-title-input"
+          placeholder="Article title (optional)"
+          autocomplete="off"
+        />
+        <textarea
+          id="text-content-input"
+          class="text-content-input"
+          placeholder="Paste raw article text here if the URL is paywalled."
+          rows="6"
+        ></textarea>
+        <button id="text-analyze-btn" class="btn btn-primary text-analyze-btn">Analyse Text</button>
+      </div>
+
+      <!-- Compare Mode -->
+      <div id="compare-input-area" class="input-card compare-input-card">
+        <div class="compare-inputs">
+          <div class="compare-col">
+            <label class="input-label">Article A</label>
+            <input type="text" id="compare-url-a" placeholder="https://example.com/article-a" autocomplete="off" />
+          </div>
+          <div class="compare-col">
+            <label class="input-label">Article B</label>
+            <input type="text" id="compare-url-b" placeholder="https://example.com/article-b" autocomplete="off" />
+          </div>
+        </div>
+        <button id="compare-btn" class="btn btn-primary compare-btn">Compare</button>
+      </div>
+    </section>
 
     <!-- Error Banner -->
     <div id="error-banner" class="error-banner">
@@ -38,52 +107,125 @@
       <button id="retry-btn" class="btn-retry">Retry</button>
     </div>
 
+    <!-- Progress Loader -->
+    <div id="progress-loader" class="progress-loader">
+      <div class="progress-bar-track">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+      <p id="progress-text" class="progress-text">Analysing article...</p>
+    </div>
+
     <!-- Skeleton Loading -->
     <div id="skeleton-grid" class="skeleton-grid"></div>
 
-    <!-- Article Info -->
-    <div id="article-info" class="article-info">
-      <h2 id="article-title"></h2>
-      <a id="article-source" class="article-source" href="#" target="_blank" rel="noopener noreferrer"></a>
-      <p id="article-summary-text"></p>
-    </div>
-
-    <!-- Results -->
+    <!-- ══════════════════════════════════════ -->
+    <!-- RESULTS SECTION -->
+    <!-- ══════════════════════════════════════ -->
     <section id="results" class="results">
 
-      <!-- Archetype Cards -->
-      <div id="cards-grid" class="cards-grid"></div>
-
-      <!-- Commonalities -->
-      <div id="commonalities" class="commonalities">
-        <h3>Shared Across Perspectives</h3>
-        <p id="commonalities-text"></p>
-      </div>
-
-      <!-- Synthesize -->
-      <div id="synthesize-area" class="synthesize-area">
-        <button id="synthesize-btn" class="btn-synthesize">
-          Synthesize All Perspectives
-        </button>
-      </div>
-
-      <!-- Synthesis Result -->
-      <div id="synthesis-result" class="synthesis-result">
-        <div class="synthesis-result-header">
-          <h3>Balanced Synthesis</h3>
-          <button id="copy-btn" class="btn-copy" title="Copy to clipboard">
-            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>
-            <span class="copy-label">Copy</span>
-          </button>
+      <!-- Article Info + Export -->
+      <article id="article-info" class="article-info-card">
+        <h2 id="article-title"></h2>
+        <a id="article-source" class="article-source" href="#" target="_blank" rel="noopener noreferrer"></a>
+        <p id="article-summary-text" class="article-summary-text"></p>
+        <div id="export-buttons" class="export-buttons">
+          <button id="export-json" class="btn-export" title="Download as JSON">Export JSON</button>
+          <button id="export-text" class="btn-export" title="Download as text">Export Text</button>
+          <button id="share-link" class="btn-export" title="Copy share link">Share Link</button>
         </div>
-        <p id="synthesis-text"></p>
-      </div>
+      </article>
 
+      <!-- Political Spectrum Bar -->
+      <section id="spectrum-section" class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Political spectrum</h2>
+            <p class="panel-subtitle">Single-axis placement from Liberty (&minus;3) to Order (+3), inferred from personas.</p>
+          </div>
+          <label class="toggle-label">
+            <input type="checkbox" id="show-2d" /> Show Economic vs Social axes
+          </label>
+        </div>
+        <div id="spectrum-bar" class="spectrum-bar">
+          <div class="spectrum-gradient">
+            <div id="spectrum-fill" class="spectrum-fill"></div>
+            <div id="spectrum-dot" class="spectrum-dot"></div>
+          </div>
+          <div class="spectrum-labels">
+            <span>-3</span><span>-2</span><span>-1</span><span>0</span><span>+1</span><span>+2</span><span>+3</span>
+          </div>
+          <p id="spectrum-value" class="spectrum-value"></p>
+        </div>
+
+        <!-- Disagreement Meter -->
+        <div id="disagreement-meter" class="disagreement-meter">
+          <div class="meter-row">
+            <span class="meter-label">Disagreement meter:</span>
+            <div class="meter-track">
+              <div id="meter-fill" class="meter-fill"></div>
+            </div>
+            <span id="meter-stdev" class="meter-stdev"></span>
+          </div>
+          <p id="meter-clusters" class="meter-clusters"></p>
+        </div>
+      </section>
+
+      <!-- 2D Axis Grid -->
+      <section id="axis-grid-section" class="panel axis-grid-section">
+        <div class="panel-header">
+          <h3 class="panel-title">Economic vs Social axes</h3>
+          <div id="axes-legend" class="axes-legend">
+            <span class="legend-tag">Economic: &minus;3 more intervention &larr;&rarr; +3 more market</span>
+            <span class="legend-tag">Social: &minus;3 more libertarian &larr;&rarr; +3 more authoritarian</span>
+            <span class="legend-colour-scale">
+              <span id="legend-dot-lo" class="legend-dot"></span> to
+              <span id="legend-dot-hi" class="legend-dot"></span> colour scale
+            </span>
+          </div>
+        </div>
+        <div id="axis-grid" class="axis-grid">
+          <div class="axis-label axis-label-x">Economic (&minus;3 &larr;&rarr; +3)</div>
+          <div class="axis-label axis-label-y">Social (&minus;3 &larr;&rarr; +3)</div>
+          <!-- gridlines + dots injected by JS -->
+        </div>
+      </section>
+
+      <!-- Persona Clusters -->
+      <div id="persona-clusters"></div>
+
+      <!-- Debiaser Section -->
+      <section id="debiaser-section" class="panel debiaser-section">
+        <h3 class="panel-title">Truth-seeking summary</h3>
+        <p id="debiaser-summary" class="debiaser-summary"></p>
+        <div class="debiaser-grid">
+          <div class="list-card">
+            <h5 class="list-card-title">Consensus</h5>
+            <ul id="debiaser-consensus" class="list-card-items"></ul>
+          </div>
+          <div class="list-card">
+            <h5 class="list-card-title">Disagreements</h5>
+            <ul id="debiaser-disagreements" class="list-card-items"></ul>
+          </div>
+          <div class="list-card">
+            <h5 class="list-card-title">Likely bias drivers</h5>
+            <ul id="debiaser-bias" class="list-card-items"></ul>
+          </div>
+        </div>
+      </section>
+
+    </section>
+
+    <!-- Compare Results -->
+    <section id="compare-results" class="compare-results">
+      <div class="compare-columns">
+        <div class="compare-result-col" id="compare-col-a"></div>
+        <div class="compare-result-col" id="compare-col-b"></div>
+      </div>
     </section>
 
     <!-- Footer -->
     <footer>
-      PoliticalDebAIser &mdash; See every side of the story.
+      Debiaser &mdash; See every side of the story.
     </footer>
 
   </div>

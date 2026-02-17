@@ -1,11 +1,72 @@
+use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 
-use scraper::{Html, Selector};
+use scraper::{ElementRef, Html, Selector};
 
 use crate::models::{ArticleCache, ArticleContent};
 
 /// Maximum article body length in characters before truncation.
 const MAX_CONTENT_LENGTH: usize = 50_000;
+
+/// Check if an IP address is private, loopback, or otherwise non-public.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()           // 127.0.0.0/8
+                || v4.is_private()     // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                || v4.is_link_local()  // 169.254.0.0/16
+                || v4.is_unspecified() // 0.0.0.0
+                || v4.is_broadcast()   // 255.255.255.255
+                || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64 // 100.64.0.0/10 (CGNAT)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()           // ::1
+                || v6.is_unspecified() // ::
+                // Unique local addresses fc00::/7
+                || (v6.segments()[0] & 0xfe00) == 0xfc00
+                // Link-local fe80::/10
+                || (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// Validate that a URL does not target private/internal network addresses (SSRF protection).
+fn validate_url_target(url: &str) -> Result<(), ScrapeError> {
+    let parsed = url::Url::parse(url)
+        .map_err(|_| ScrapeError::InvalidUrl("Malformed URL".to_string()))?;
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| ScrapeError::InvalidUrl("URL has no host".to_string()))?;
+
+    // Block common internal hostnames
+    let host_lower = host.to_lowercase();
+    if host_lower == "localhost"
+        || host_lower.ends_with(".local")
+        || host_lower.ends_with(".internal")
+        || host_lower.ends_with(".corp")
+        || host_lower == "metadata.google.internal"
+    {
+        return Err(ScrapeError::InvalidUrl(
+            "URLs targeting internal/private hosts are not allowed".to_string(),
+        ));
+    }
+
+    // Try to resolve the hostname and check if any resolved IP is private
+    let port = parsed.port().unwrap_or(80);
+    let addr_str = format!("{host}:{port}");
+    if let Ok(addrs) = addr_str.to_socket_addrs() {
+        for addr in addrs {
+            if is_private_ip(&addr.ip()) {
+                return Err(ScrapeError::InvalidUrl(
+                    "URLs resolving to private/internal IP addresses are not allowed".to_string(),
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 /// Common paywall indicator strings found in page content.
 const PAYWALL_INDICATORS: &[&str] = &[
@@ -45,7 +106,11 @@ impl std::fmt::Display for ScrapeError {
 
 impl std::error::Error for ScrapeError {}
 
+const ARCHIVE_DISCLAIMER: &str =
+    "This article was accessed via archive.ph for analysis purposes only. No copyright infringement intended.";
+
 /// Fetch and extract an article, using the cache to avoid repeat fetches.
+/// If the article is behind a paywall, automatically retries via archive.ph.
 pub async fn scrape_article(
     url: &str,
     cache: &ArticleCache,
@@ -57,6 +122,9 @@ pub async fn scrape_article(
         ));
     }
 
+    // SSRF protection: block requests to private/internal networks
+    validate_url_target(url)?;
+
     // Check cache
     {
         let cache_read = cache.read().await;
@@ -65,7 +133,41 @@ pub async fn scrape_article(
         }
     }
 
-    // Fetch with a 30-second timeout
+    // Try fetching the article directly first
+    match fetch_and_parse(url).await {
+        Ok(article) => {
+            // Store in cache
+            let mut cache_write = cache.write().await;
+            cache_write.insert(url.to_string(), article.clone());
+            Ok(article)
+        }
+        Err(ScrapeError::Paywall) => {
+            // Paywall detected — try archive.ph fallback
+            tracing::info!("Paywall detected for {url}, trying archive.ph fallback");
+            match try_archive_ph(url).await {
+                Ok(mut article) => {
+                    article.source_url = url.to_string();
+                    article.paywalled = true;
+                    article.disclaimer = Some(ARCHIVE_DISCLAIMER.to_string());
+                    // Cache the archive.ph result under the original URL
+                    let mut cache_write = cache.write().await;
+                    cache_write.insert(url.to_string(), article.clone());
+                    Ok(article)
+                }
+                Err(archive_err) => {
+                    tracing::warn!(
+                        "archive.ph fallback failed for {url}: {archive_err}"
+                    );
+                    Err(ScrapeError::Paywall)
+                }
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Fetch a URL and parse its HTML into ArticleContent.
+async fn fetch_and_parse(url: &str) -> Result<ArticleContent, ScrapeError> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
@@ -109,16 +211,40 @@ pub async fn scrape_article(
         .await
         .map_err(|e| ScrapeError::FetchFailed(e.to_string()))?;
 
-    // Parse synchronously so the non-Send Html type doesn't span an await
-    let article = parse_html(&html_text, url)?;
+    parse_html(&html_text, url)
+}
 
-    // Store in cache
-    {
-        let mut cache_write = cache.write().await;
-        cache_write.insert(url.to_string(), article.clone());
+/// Try fetching an article via archive.ph as a paywall bypass.
+async fn try_archive_ph(original_url: &str) -> Result<ArticleContent, ScrapeError> {
+    let archive_url = format!("https://archive.ph/newest/{original_url}");
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::limited(5))
+        .build()
+        .map_err(|e| ScrapeError::FetchFailed(e.to_string()))?;
+
+    let response = client.get(&archive_url).send().await.map_err(|e| {
+        if e.is_timeout() {
+            ScrapeError::Timeout(e.to_string())
+        } else {
+            ScrapeError::FetchFailed(e.to_string())
+        }
+    })?;
+
+    if !response.status().is_success() {
+        return Err(ScrapeError::FetchFailed(format!(
+            "archive.ph returned HTTP {}",
+            response.status()
+        )));
     }
 
-    Ok(article)
+    let html_text = response
+        .text()
+        .await
+        .map_err(|e| ScrapeError::FetchFailed(e.to_string()))?;
+
+    parse_html(&html_text, original_url)
 }
 
 /// Parse raw HTML into an ArticleContent (synchronous, no await points).
@@ -161,40 +287,141 @@ fn parse_html(html_text: &str, url: &str) -> Result<ArticleContent, ScrapeError>
         body_text,
         meta_description,
         source_url: url.to_string(),
+        paywalled: false,
+        disclaimer: None,
     })
 }
 
 fn extract_title(document: &Html) -> Option<String> {
-    // Try <title> tag first
+    // 1. Try og:title meta tag (most reliable for articles)
+    if let Some(og_title) = extract_og_title(document) {
+        return Some(og_title);
+    }
+    // 2. Try <title> tag
     if let Some(title) = select_text(document, "title") {
         if !title.is_empty() {
             return Some(title);
         }
     }
-    // Fall back to first <h1>
+    // 3. Fall back to first <h1>
     select_text(document, "h1")
 }
 
-fn extract_body_text(document: &Html) -> String {
-    // Try common article container selectors, fall back to <body>
-    let selectors = ["article", "main", ".article-body", ".post-content", "body"];
+fn extract_og_title(document: &Html) -> Option<String> {
+    let selector = Selector::parse(r#"meta[property="og:title"]"#).ok()?;
+    document
+        .select(&selector)
+        .next()
+        .and_then(|el| el.value().attr("content"))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
-    for sel_str in &selectors {
+/// Tags whose subtrees should be skipped during text extraction.
+const STRIP_TAGS: &[&str] = &[
+    "nav", "header", "footer", "aside", "script", "style", "noscript", "svg", "form",
+];
+
+/// Class substrings that indicate non-content elements.
+const STRIP_CLASSES: &[&str] = &[
+    "sidebar", "comment", "nav", "menu", "footer", "header",
+    "social-share", "share", "related", "ad-", "advertisement",
+    "promo", "newsletter", "popup",
+];
+
+/// Container selectors to try, in priority order. First match with enough text wins.
+const CONTENT_SELECTORS: &[&str] = &[
+    "[itemprop=articleBody]",
+    "[role=main]",
+    "article",
+    ".article-body",
+    ".entry-content",
+    ".story-body",
+    ".post-body",
+    ".post-content",
+    "main",
+    "body",
+];
+
+fn extract_body_text(document: &Html) -> String {
+    // Try each content selector; score all candidates and pick the best
+    let mut best_text = String::new();
+    let mut best_score: usize = 0;
+
+    for sel_str in CONTENT_SELECTORS {
         if let Ok(selector) = Selector::parse(sel_str) {
-            if let Some(element) = document.select(&selector).next() {
-                let text: String = element
-                    .text()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let cleaned = collapse_whitespace(&text);
-                if !cleaned.is_empty() {
-                    return cleaned;
+            for element in document.select(&selector) {
+                let score = score_content_node(element);
+                if score > best_score {
+                    let text = extract_clean_text(element);
+                    if !text.is_empty() {
+                        best_score = score;
+                        best_text = text;
+                    }
                 }
             }
         }
     }
 
-    String::new()
+    best_text
+}
+
+/// Recursively extract text from an element, skipping non-content subtrees.
+fn extract_clean_text(element: ElementRef) -> String {
+    let mut parts = Vec::new();
+    collect_text_recursive(element, &mut parts);
+    collapse_whitespace(&parts.join(" "))
+}
+
+fn collect_text_recursive(element: ElementRef, parts: &mut Vec<String>) {
+    for child in element.children() {
+        if let Some(text) = child.value().as_text() {
+            let t = text.trim();
+            if !t.is_empty() {
+                parts.push(t.to_string());
+            }
+        } else if let Some(child_el) = ElementRef::wrap(child) {
+            let tag = child_el.value().name();
+
+            // Skip stripped tags entirely
+            if STRIP_TAGS.contains(&tag) {
+                continue;
+            }
+
+            // Skip elements with non-content class names
+            if let Some(classes) = child_el.value().attr("class") {
+                let classes_lower = classes.to_lowercase();
+                if STRIP_CLASSES
+                    .iter()
+                    .any(|c| classes_lower.contains(c))
+                {
+                    continue;
+                }
+            }
+
+            collect_text_recursive(child_el, parts);
+        }
+    }
+}
+
+/// Score a content node by text density and paragraph count.
+/// Higher score = more likely to be the main article body.
+fn score_content_node(element: ElementRef) -> usize {
+    let text = extract_clean_text(element);
+    let text_len = text.len();
+
+    if text_len < 50 {
+        return 0;
+    }
+
+    // Count <p> tags as a signal of article prose
+    let p_count = Selector::parse("p")
+        .ok()
+        .map(|sel| element.select(&sel).count())
+        .unwrap_or(0);
+
+    // Score = text length + bonus for paragraph density
+    text_len + (p_count * 50)
 }
 
 fn extract_meta_description(document: &Html) -> Option<String> {
@@ -219,6 +446,25 @@ fn select_text(document: &Html, sel: &str) -> Option<String> {
 /// Collapse runs of whitespace (spaces, newlines, tabs) into single spaces.
 fn collapse_whitespace(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Wrap raw plain text into an ArticleContent without HTML parsing.
+/// For the plain-text input feature where users paste article text directly.
+pub fn extract_from_text(text: &str, title: Option<&str>) -> ArticleContent {
+    let body_text = collapse_whitespace(text.trim());
+    let title = title
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "Untitled".to_string());
+
+    ArticleContent {
+        title,
+        body_text,
+        meta_description: None,
+        source_url: String::new(),
+        paywalled: false,
+        disclaimer: None,
+    }
 }
 
 #[cfg(test)]
@@ -254,37 +500,37 @@ mod tests {
     #[test]
     fn extract_body_text_from_article_tag() {
         let html = Html::parse_document(
-            "<html><body><article><p>Article content here.</p></article></body></html>",
+            "<html><body><article><p>Article content here with enough text to pass the minimum scoring threshold for extraction.</p></article></body></html>",
         );
         let text = extract_body_text(&html);
-        assert!(text.contains("Article content here."));
+        assert!(text.contains("Article content here"));
     }
 
     #[test]
     fn extract_body_text_from_main_tag() {
         let html = Html::parse_document(
-            "<html><body><main><p>Main content.</p></main></body></html>",
+            "<html><body><main><p>Main content with sufficient text length to meet the scoring threshold for content extraction.</p></main></body></html>",
         );
         let text = extract_body_text(&html);
-        assert!(text.contains("Main content."));
+        assert!(text.contains("Main content"));
     }
 
     #[test]
     fn extract_body_text_falls_back_to_body() {
         let html = Html::parse_document(
-            "<html><body><div><p>Body fallback content.</p></div></body></html>",
+            "<html><body><div><p>Body fallback content with enough text to pass the scoring threshold for the content extraction algorithm.</p></div></body></html>",
         );
         let text = extract_body_text(&html);
-        assert!(text.contains("Body fallback content."));
+        assert!(text.contains("Body fallback content"));
     }
 
     #[test]
     fn extract_body_text_collapses_whitespace() {
         let html = Html::parse_document(
-            "<html><body>  lots   of   spaces\n\nand\nnewlines  </body></html>",
+            "<html><body><article><p>  lots   of   spaces\n\nand\nnewlines   in this article text that needs to be long enough  </p></article></body></html>",
         );
         let text = extract_body_text(&html);
-        assert_eq!(text, "lots of spaces and newlines");
+        assert!(text.contains("lots of spaces and newlines"));
     }
 
     #[test]
@@ -341,7 +587,7 @@ mod tests {
 
     #[test]
     fn parse_html_extracts_article() {
-        let html = r#"<html><head><title>Test</title></head><body><article><p>Content here</p></article></body></html>"#;
+        let html = r#"<html><head><title>Test</title></head><body><article><p>Content here with enough text to pass the minimum scoring threshold for content extraction in the new algorithm.</p></article></body></html>"#;
         let result = parse_html(html, "https://example.com");
         assert!(result.is_ok());
         let article = result.unwrap();
@@ -363,7 +609,7 @@ mod tests {
 
     #[test]
     fn parse_html_uses_untitled_for_missing_title() {
-        let html = "<html><body><article><p>Some text</p></article></body></html>";
+        let html = "<html><body><article><p>Some text that is long enough to pass the minimum scoring threshold for content extraction in the algorithm.</p></article></body></html>";
         let result = parse_html(html, "https://example.com").unwrap();
         assert_eq!(result.title, "Untitled");
     }
@@ -381,7 +627,9 @@ mod tests {
 
     #[test]
     fn parse_html_detects_paywall_short_content() {
-        let html = "<html><body><article><p>Subscribe to continue reading.</p></article></body></html>";
+        // Content must be long enough (50+ chars) to pass scoring but short enough (<500 chars)
+        // to trigger paywall detection with a single indicator
+        let html = "<html><body><article><p>Subscribe to continue reading. Please sign up for a premium account to access this exclusive content and all future articles.</p></article></body></html>";
         let result = parse_html(html, "https://example.com");
         assert!(result.is_err());
         match result.unwrap_err() {
@@ -499,6 +747,8 @@ mod tests {
                 body_text: "Cached body text".to_string(),
                 meta_description: None,
                 source_url: "https://example.com/cached".to_string(),
+                paywalled: false,
+                disclaimer: None,
             };
             {
                 let mut cache_write = cache.write().await;
@@ -512,5 +762,212 @@ mod tests {
             assert_eq!(cached.title, "Cached Title");
             assert_eq!(cached.body_text, "Cached body text");
         });
+    }
+
+    // --- Content node scoring tests ---
+
+    #[test]
+    fn scoring_prefers_article_body_over_nav() {
+        let html = Html::parse_document(r#"
+            <html><body>
+                <nav><a>Home</a> <a>About</a> <a>Contact</a></nav>
+                <article>
+                    <p>This is the main article content with plenty of text to ensure it scores higher than navigation links.</p>
+                    <p>Another paragraph with meaningful article content about political analysis.</p>
+                </article>
+            </body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("main article content"));
+        assert!(!text.contains("Home"));
+    }
+
+    #[test]
+    fn scoring_prefers_high_paragraph_density() {
+        let html = Html::parse_document(r#"
+            <html><body>
+                <div class="sidebar"><p>Short sidebar text here.</p></div>
+                <article>
+                    <p>First paragraph of the article with substantial content for analysis.</p>
+                    <p>Second paragraph continuing the discussion of important political events.</p>
+                    <p>Third paragraph wrapping up with a conclusion on the matter at hand.</p>
+                </article>
+            </body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("First paragraph"));
+        assert!(!text.contains("Short sidebar text"));
+    }
+
+    // --- Element stripping tests ---
+
+    #[test]
+    fn strips_nav_elements() {
+        let html = Html::parse_document(r#"
+            <html><body><article>
+                <nav><a>Menu Item 1</a> <a>Menu Item 2</a></nav>
+                <p>Actual article content that should be extracted and kept in the output.</p>
+            </article></body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("Actual article content"));
+        assert!(!text.contains("Menu Item"));
+    }
+
+    #[test]
+    fn strips_footer_elements() {
+        let html = Html::parse_document(r#"
+            <html><body><article>
+                <p>Article content that should remain in the extracted text for analysis.</p>
+                <footer>Copyright 2026 Example Corp. All rights reserved.</footer>
+            </article></body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("Article content"));
+        assert!(!text.contains("Copyright 2026"));
+    }
+
+    #[test]
+    fn strips_elements_with_ad_class() {
+        let html = Html::parse_document(r#"
+            <html><body><article>
+                <p>Real news article content about current political events and policy decisions.</p>
+                <div class="ad-container">Buy our product! Special offer inside!</div>
+                <p>More article content continuing the story about political developments today.</p>
+            </article></body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("Real news article"));
+        assert!(text.contains("More article content"));
+        assert!(!text.contains("Buy our product"));
+    }
+
+    #[test]
+    fn strips_sidebar_class_elements() {
+        let html = Html::parse_document(r#"
+            <html><body><article>
+                <p>Main article text with enough content to be extracted as the primary body.</p>
+                <div class="sidebar-widget">Related stories and sidebar content here.</div>
+            </article></body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("Main article text"));
+        assert!(!text.contains("Related stories and sidebar"));
+    }
+
+    #[test]
+    fn strips_script_and_style_tags() {
+        let html = Html::parse_document(r#"
+            <html><body><article>
+                <script>var x = "should not appear in output";</script>
+                <style>.article { color: red; }</style>
+                <p>Only this article content should appear in the final extracted text output.</p>
+            </article></body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("Only this article content"));
+        assert!(!text.contains("should not appear"));
+        assert!(!text.contains("color: red"));
+    }
+
+    // --- og:title extraction tests ---
+
+    #[test]
+    fn extract_title_prefers_og_title() {
+        let html = Html::parse_document(r#"
+            <html>
+            <head>
+                <meta property="og:title" content="OG Title Here">
+                <title>HTML Title Here</title>
+            </head>
+            <body><h1>H1 Title Here</h1></body>
+            </html>
+        "#);
+        assert_eq!(extract_title(&html), Some("OG Title Here".to_string()));
+    }
+
+    #[test]
+    fn extract_title_falls_back_from_empty_og_title() {
+        let html = Html::parse_document(r#"
+            <html>
+            <head>
+                <meta property="og:title" content="">
+                <title>Fallback Title</title>
+            </head>
+            <body></body>
+            </html>
+        "#);
+        assert_eq!(extract_title(&html), Some("Fallback Title".to_string()));
+    }
+
+    // --- extract_from_text tests ---
+
+    #[test]
+    fn extract_from_text_with_title() {
+        let article = extract_from_text("Some article body text here.", Some("My Title"));
+        assert_eq!(article.title, "My Title");
+        assert_eq!(article.body_text, "Some article body text here.");
+        assert_eq!(article.source_url, "");
+        assert_eq!(article.meta_description, None);
+    }
+
+    #[test]
+    fn extract_from_text_without_title() {
+        let article = extract_from_text("Body text only.", None);
+        assert_eq!(article.title, "Untitled");
+        assert_eq!(article.body_text, "Body text only.");
+    }
+
+    #[test]
+    fn extract_from_text_with_empty_title() {
+        let article = extract_from_text("Body text.", Some("  "));
+        assert_eq!(article.title, "Untitled");
+    }
+
+    #[test]
+    fn extract_from_text_collapses_whitespace() {
+        let article = extract_from_text("  lots   of   spaces\n\nand\nnewlines  ", Some("Title"));
+        assert_eq!(article.body_text, "lots of spaces and newlines");
+    }
+
+    // --- Container selector tests ---
+
+    #[test]
+    fn extracts_from_itemprop_article_body() {
+        let html = Html::parse_document(r#"
+            <html><body>
+                <div itemprop="articleBody">
+                    <p>This content is marked with the articleBody itemprop and should be extracted.</p>
+                </div>
+            </body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("articleBody itemprop"));
+    }
+
+    #[test]
+    fn extracts_from_entry_content_class() {
+        let html = Html::parse_document(r#"
+            <html><body>
+                <div class="entry-content">
+                    <p>WordPress-style entry content that should be properly extracted from the page.</p>
+                </div>
+            </body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("WordPress-style entry content"));
+    }
+
+    #[test]
+    fn extracts_from_role_main() {
+        let html = Html::parse_document(r#"
+            <html><body>
+                <div role="main">
+                    <p>Content inside a role=main element should be found and extracted properly.</p>
+                </div>
+            </body></html>
+        "#);
+        let text = extract_body_text(&html);
+        assert!(text.contains("role=main element"));
     }
 }

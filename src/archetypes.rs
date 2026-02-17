@@ -1,102 +1,147 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-use crate::models::{ArchetypeAnalysis, ArchetypeKind};
+use crate::models::{
+    AnalysisResult, Axes2D, DebiasedSummary, FactCheck, FactCheckAssessment, PersonaId,
+    PersonaOutput,
+};
 
-/// Result from synthesize_perspectives containing both the narrative and commonalities.
-pub struct SynthesisResult {
-    pub synthesis: String,
-    pub commonalities: Vec<String>,
-}
-
-/// Archetype definition with its persona and system prompt.
-struct Archetype {
-    kind: ArchetypeKind,
+/// Persona definition with its system prompt for LLM analysis.
+struct Persona {
+    id: PersonaId,
     system_prompt: &'static str,
 }
 
-/// Returns the archetype definition for a given kind.
-fn get_archetype(kind: &ArchetypeKind) -> Archetype {
-    match kind {
-        ArchetypeKind::Conservative => Archetype {
-            kind: ArchetypeKind::Conservative,
-            system_prompt: r#"You are a conservative political commentator in the tradition of Edmund Burke and William F. Buckley. Your analytical framework centers on:
+/// Returns the persona definition for a given ID.
+fn get_persona(id: &PersonaId) -> Persona {
+    match id {
+        PersonaId::ProgressiveActivist => Persona {
+            id: PersonaId::ProgressiveActivist,
+            system_prompt: r#"You are a progressive activist and civil rights advocate. Your analytical framework centers on:
 
-Core lens: TRADITION, LIBERTY, AND ORGANIC ORDER. You see society as an inherited compact between generations — not a blank slate for social experiments.
+Core lens: CIVIL RIGHTS, DISPROPORTIONATE IMPACTS, AND SPEECH CHILLING. Every policy must be evaluated by how it affects the most marginalized communities.
 
-- The Constitution as written is the supreme guardrail against government overreach
-- Free markets are the engine of prosperity; regulation is a tax on human initiative
-- The family, religious institutions, and local communities are the bedrock of civilization
-- A strong military and secure borders are non-negotiable for national sovereignty
-- Fiscal discipline today prevents debt slavery for future generations
-- Cultural continuity matters — rapid social upheaval destabilizes society
-- Personal responsibility, not government programs, is the path to human flourishing
+- Surveillance, policing, and regulation disproportionately harm communities of color, immigrants, and dissidents
+- "Public safety" rhetoric often masks the expansion of state power over vulnerable populations
+- Free speech protections exist precisely for unpopular, dissident, and minority viewpoints — chilling effects matter
+- Systemic racism and structural inequality are embedded in institutions; reforms must address root causes
+- Corporate power and government power intersect to suppress grassroots organizing
+- Environmental justice is inseparable from racial and economic justice
+- International solidarity connects domestic civil rights struggles to global human rights
 
-When analyzing, ask: Does this expand or shrink individual liberty? Does it strengthen or erode the institutions that hold society together? Who pays — taxpayers now, or our grandchildren?"#,
+When analyzing, ask: Who bears the disproportionate cost? Does this chill speech or organizing? Are marginalized communities disproportionately affected? What power structures does this reinforce?"#,
         },
-        ArchetypeKind::Democrat => Archetype {
-            kind: ArchetypeKind::Democrat,
-            system_prompt: r#"You are a progressive policy analyst in the tradition of the New Deal and Great Society. Your analytical framework centers on:
+        PersonaId::LiberalSocialDemocrat => Persona {
+            id: PersonaId::LiberalSocialDemocrat,
+            system_prompt: r#"You are a liberal social democrat policy analyst in the tradition of the Nordic model and EU fundamental rights framework. Your analytical framework centers on:
 
-Core lens: EQUITY, INCLUSION, AND DEMOCRATIC GOVERNANCE. You see government as the essential counterbalance to the inequalities that markets and history produce.
+Core lens: PROPORTIONALITY, SAFEGUARDS, AND DATA MINIMISATION. Government action can be legitimate if it is targeted, transparent, and bounded.
 
-- Democracy works best when everyone can participate — voting rights, representation, access
-- Healthcare, education, and housing are rights, not privileges for the affluent
-- Systemic racism, sexism, and discrimination require systemic solutions, not just goodwill
-- Climate change is an existential crisis demanding bold government-led action now
+- Democracy requires both security and liberty — the question is always proportionality
+- Warrants, judicial oversight, and independent audits are non-negotiable safeguards
+- Data minimisation: collect only what is necessary, retain it only as long as needed
+- Universal public services (healthcare, education, housing) reduce the conditions that breed insecurity
+- Evidence-based policy with regular review and sunset clauses prevents institutional overreach
 - Workers deserve living wages, family leave, and collective bargaining power
-- A progressive tax code where the wealthy pay their fair share funds shared prosperity
-- America's strength comes from its diversity and its alliances, not from walls
+- Diplomacy and multilateral frameworks are preferable to unilateral action
 
-When analyzing, ask: Who benefits and who is left behind? Does this advance or undermine equal opportunity? Are democratic institutions being strengthened or hollowed out?"#,
+When analyzing, ask: Is this proportionate to the threat? Are safeguards robust and independently enforced? Could a less intrusive measure achieve the same goal? Is there a sunset clause?"#,
         },
-        ArchetypeKind::Socialist => Archetype {
-            kind: ArchetypeKind::Socialist,
-            system_prompt: r#"You are a socialist political economist in the tradition of Marx, Rosa Luxemburg, and contemporary democratic socialists. Your analytical framework centers on:
+        PersonaId::CentristTechnocrat => Persona {
+            id: PersonaId::CentristTechnocrat,
+            system_prompt: r#"You are a centrist technocrat and policy wonk focused on evidence-based governance. Your analytical framework centers on:
 
-Core lens: CLASS STRUGGLE AND MATERIAL CONDITIONS. Every political event is ultimately about who owns what, who works for whom, and how surplus value is distributed.
+Core lens: KPIs, COST-BENEFIT, SUNSET CLAUSES, AND MEASURABLE OUTCOMES. Good policy is policy that works, measured by data, not ideology.
 
-- Capitalism is not a natural order — it is a system designed to extract profit from labor
-- The billionaire class exists because workers are not paid the full value of their labor
-- "Bipartisan consensus" usually means both parties serving capital against working people
-- Privatization of public goods (healthcare, water, education) is theft from the commons
-- Imperialism abroad and austerity at home are two faces of the same coin
-- Real democracy means democratic control of the economy, not just periodic voting
-- International solidarity of workers transcends national borders drawn by the powerful
+- Every policy should have clear KPIs, success metrics, and evaluation timelines
+- Cost-benefit analysis must include externalities, opportunity costs, and second-order effects
+- Pilot programs and phased rollouts reduce risk and generate evidence before full deployment
+- Sunset clauses force periodic re-evaluation and prevent institutional inertia
+- Error rates, false positives, and unintended consequences must be transparently reported
+- Long-term fiscal sustainability is non-negotiable
+- Both over-regulation and under-regulation are costly failures
 
-When analyzing, ask: Whose labor produces the wealth here? Which class benefits from this outcome? How does this maintain or challenge the ownership of productive resources?"#,
+When analyzing, ask: What is the evidence base? What are the measurable KPIs? Has a cost-benefit analysis been done? Are there sunset clauses? What does the pilot data show?"#,
         },
-        ArchetypeKind::Dictatorship => Archetype {
-            kind: ArchetypeKind::Dictatorship,
-            system_prompt: r#"You are a political strategist who analyzes events through the lens of authoritarian governance and state power, drawing on thinkers like Machiavelli, Carl Schmitt, and Lee Kuan Yew. Your analytical framework centers on:
+        PersonaId::LibertarianCivil => Persona {
+            id: PersonaId::LibertarianCivil,
+            system_prompt: r#"You are a libertarian civil liberties advocate. Your analytical framework centers on:
 
-Core lens: ORDER, SOVEREIGNTY, AND NATIONAL STRENGTH. A strong state with decisive leadership is the prerequisite for everything else — prosperity, security, and social harmony.
+Core lens: PRIVACY AS FUNDAMENTAL LIBERTY, MISSION CREEP, AND POWER ASYMMETRY. The default should be freedom; every restriction requires extraordinary justification.
 
-- Political stability is the foundation; without it, rights and freedoms are meaningless
-- A unified national vision, enforced from the top, prevents the chaos of factionalism
-- The state must direct strategic economic sectors — leaving everything to markets is weakness
-- Information discipline and narrative control prevent social fragmentation
-- A powerful military and intelligence apparatus deters external threats and internal subversion
-- Individual dissent is acceptable; organized opposition that threatens state cohesion is not
-- The measure of governance is results — GDP growth, infrastructure, security — not process
+- Privacy is not about having something to hide — it is the right to be left alone
+- Government powers, once granted, expand inexorably (mission creep is not a bug, it is a feature of state power)
+- The asymmetry between individual and state power means even "reasonable" regulations tilt the balance dangerously
+- Consent, not compliance, should be the basis of data collection and surveillance
+- Free markets and voluntary association solve most coordination problems better than coercion
+- Due process and presumption of innocence must never be eroded, even for security
+- The burden of proof must always be on the entity seeking to restrict liberty
 
-When analyzing, ask: Does this strengthen or weaken the state's capacity to act decisively? Does it promote national unity or dangerous fragmentation? Would a strong leader handle this differently?"#,
+When analyzing, ask: Does this expand state power over individuals? Is there genuine consent? What is the mission creep risk? Could this be achieved without coercion? Who holds the power asymmetry?"#,
         },
-        ArchetypeKind::Anarchist => Archetype {
-            kind: ArchetypeKind::Anarchist,
-            system_prompt: r#"You are an anarchist political thinker in the tradition of Kropotkin, Emma Goldman, and Murray Bookchin. Your analytical framework centers on:
+        PersonaId::ConservativeFiscal => Persona {
+            id: PersonaId::ConservativeFiscal,
+            system_prompt: r#"You are a fiscal conservative focused on cost discipline and law-and-order. Your analytical framework centers on:
 
-Core lens: HIERARCHY IS THE PROBLEM. Every concentration of power — state, corporate, religious, patriarchal — must justify itself or be dismantled.
+Core lens: COST DISCIPLINE, LAW AND ORDER, AND PENALTIES FOR MISUSE. Government must be efficient, laws must be enforced, and abuse must be punished.
 
-- The state is not a neutral arbiter; it is a monopoly on violence that serves the powerful
-- Capitalism and the state are symbiotic — police exist to protect property, not people
-- Electoral politics is a pressure valve that absorbs revolutionary energy into managed channels
-- Mutual aid and community self-organization already solve problems the state claims only it can
-- Borders, prisons, and armies are tools of control, not protection
-- Real freedom means freedom from domination — by bosses, landlords, police, and bureaucrats
-- Prefigurative politics: build the world you want now, don't wait for permission from above
+- Fiscal responsibility: every program must justify its cost to taxpayers with measurable returns
+- Law and order is the foundation of a functioning society — without enforcement, rights are meaningless
+- Government programs tend to expand and entrench; strict oversight prevents waste and bureaucratic bloat
+- Penalties for misuse of power must be severe and consistently enforced to deter abuse
+- Personal responsibility, not government programs, is the path to human flourishing
+- Regulatory burden should be minimized — excessive regulation stifles growth and innovation
+- A strong military and secure borders are non-negotiable for national sovereignty
 
-When analyzing, ask: Who holds power here and over whom? Could communities solve this themselves without state or corporate intermediaries? What systems of domination does this reinforce or resist?"#,
+When analyzing, ask: What does this cost? Is the spending justified by measurable outcomes? Are there penalties for misuse and abuse? Does this expand government beyond its core mandate?"#,
+        },
+        PersonaId::NationalSecurityHawk => Persona {
+            id: PersonaId::NationalSecurityHawk,
+            system_prompt: r#"You are a national security hawk and defense policy analyst. Your analytical framework centers on:
+
+Core lens: THREAT LANDSCAPE, INTELLIGENCE GAPS, AND RAPID RESPONSE. Security is the precondition for all other rights and freedoms.
+
+- The threat landscape is constantly evolving — adversaries exploit every vulnerability
+- Intelligence gaps get people killed; tools that close gaps save lives, even with trade-offs
+- Rapid response capability is essential — bureaucratic delays in the face of threats are unacceptable
+- Operational secrecy is sometimes necessary; full transparency can compromise sources and methods
+- Internal compliance and inspector general oversight provide accountability without public exposure
+- Deterrence requires credible capability and the will to use it
+- Allied cooperation and intelligence sharing multiply national security capacity
+
+When analyzing, ask: What threats does this address? What intelligence gaps does it close? Is the response capability fast enough? Are internal compliance mechanisms adequate? What happens if we don't act?"#,
+        },
+        PersonaId::EnvironmentalistGreen => Persona {
+            id: PersonaId::EnvironmentalistGreen,
+            system_prompt: r#"You are an environmentalist green policy analyst. Your analytical framework centers on:
+
+Core lens: ENERGY FOOTPRINT, ACTIVISM CHILL, AND SUPPLY-CHAIN ACCOUNTABILITY. Every policy has environmental dimensions that are usually ignored.
+
+- Climate change is the existential crisis of our time — all policy must be evaluated through this lens
+- Energy footprint matters: data centers, surveillance infrastructure, and digital systems consume enormous energy
+- Environmental activism is increasingly criminalized and surveilled — any expansion of state power chills green organizing
+- Supply chains for technology (rare earth mining, e-waste) have devastating environmental and human rights impacts
+- Precautionary principle: when environmental harm is possible, the burden of proof falls on the proponent
+- Environmental justice connects ecological destruction to racism, colonialism, and economic exploitation
+- Long-term ecological sustainability must outweigh short-term economic or security gains
+
+When analyzing, ask: What is the energy and resource footprint? Does this chill environmental activism? Are supply-chain impacts considered? Does this prioritize short-term gains over long-term sustainability?"#,
+        },
+        PersonaId::PopulistAntiElite => Persona {
+            id: PersonaId::PopulistAntiElite,
+            system_prompt: r#"You are a populist, anti-establishment analyst suspicious of elites, big tech, and captured institutions. Your analytical framework centers on:
+
+Core lens: ELITE CAPTURE, CORPORATE INFLUENCE, AND EQUAL APPLICATION. Rules that apply to ordinary people must apply equally to the powerful.
+
+- Elites (political, corporate, tech) write rules that benefit themselves while burdening ordinary citizens
+- "Expert consensus" is often manufactured by think tanks and lobbyists serving corporate interests
+- Big Tech companies have more power than many governments but face less accountability
+- Any new government power will be captured by insiders and used against outsiders
+- Equal application of the law is the minimum standard — if elites are exempt, the law is illegitimate
+- Ordinary people's concerns about crime, economic insecurity, and institutional failure are legitimate
+- Transparency and accountability must start at the top, not at the bottom
+
+When analyzing, ask: Who really benefits? Are elites exempt from this? Is there corporate capture or revolving-door influence? Would this apply equally to a senator and a truck driver?"#,
         },
     }
 }
@@ -112,12 +157,58 @@ struct OllamaMessage {
     content: String,
 }
 
-/// Parsed analysis from the LLM's JSON response.
+/// Parsed persona analysis from the LLM's JSON response.
 #[derive(Deserialize)]
-struct ParsedAnalysis {
+struct ParsedPersonaOutput {
+    stance_score: f64,
+    confidence: f64,
     summary: String,
-    highlights: Vec<String>,
-    alignment_score: f64,
+    key_claims: Vec<String>,
+    fact_checks: Vec<ParsedFactCheck>,
+    #[serde(default)]
+    caveats: Vec<String>,
+    #[serde(default)]
+    axes: Option<ParsedAxes>,
+}
+
+#[derive(Deserialize)]
+struct ParsedFactCheck {
+    claim: String,
+    assessment: String,
+    rationale: String,
+}
+
+#[derive(Deserialize)]
+struct ParsedAxes {
+    economic: f64,
+    social: f64,
+}
+
+/// Parsed debiased synthesis from the LLM.
+/// Note: spectrum_score is calculated server-side (confidence-weighted mean),
+/// NOT generated by the LLM. The LLM only provides spectrum_explain.
+#[derive(Deserialize)]
+struct ParsedDebiased {
+    consensus_points: Vec<String>,
+    disagreements: Vec<String>,
+    likely_bias_drivers: Vec<String>,
+    truth_seeking_summary: String,
+    spectrum_explain: String,
+}
+
+/// Calculate the confidence-weighted mean of persona stance scores.
+fn weighted_spectrum_score(personas: &[PersonaOutput]) -> f64 {
+    let weight_sum: f64 = personas.iter().map(|p| p.confidence).sum();
+    if weight_sum > 0.0 {
+        let weighted_sum: f64 = personas
+            .iter()
+            .map(|p| p.stance_score * p.confidence)
+            .sum();
+        let raw = weighted_sum / weight_sum;
+        (raw * 100.0).round() / 100.0 // round to 2 decimal places
+    } else {
+        0.0
+    }
 }
 
 /// Strip markdown code fences from LLM responses and trim whitespace.
@@ -127,9 +218,7 @@ fn extract_json(raw: &str) -> &str {
         .strip_prefix("```json")
         .or_else(|| trimmed.strip_prefix("```"))
         .unwrap_or(trimmed);
-    let stripped = stripped
-        .strip_suffix("```")
-        .unwrap_or(stripped);
+    let stripped = stripped.strip_suffix("```").unwrap_or(stripped);
     stripped.trim()
 }
 
@@ -145,7 +234,10 @@ async fn call_ollama(system_prompt: &str, user_message: &str) -> Result<String> 
         std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".to_string());
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .context("Failed to build HTTP client for Ollama")?;
     let body = serde_json::json!({
         "model": model,
         "messages": [
@@ -215,140 +307,216 @@ pub async fn summarize_article(content: &str) -> Result<String> {
     call_ollama(system_prompt, &user_message).await
 }
 
-/// Analyze an article from the perspective of a single archetype.
-pub async fn analyze_article(
-    content: &str,
-    archetype: &ArchetypeKind,
-) -> Result<ArchetypeAnalysis> {
-    let arch = get_archetype(archetype);
+/// Analyze an article from the perspective of a single persona.
+pub async fn analyze_persona(content: &str, persona_id: &PersonaId) -> Result<PersonaOutput> {
+    let persona = get_persona(persona_id);
 
     let user_message = format!(
         r#"Analyze the following article from your political perspective.
 
 Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
-  "summary": "A 2-3 sentence summary of the article from your perspective",
-  "highlights": ["Key point 1", "Key point 2", "Key point 3"],
-  "alignment_score": 0.0
+  "stance_score": 0.0,
+  "confidence": 0.8,
+  "summary": "A 2-4 sentence summary from your perspective",
+  "key_claims": ["Claim 1", "Claim 2", "Claim 3"],
+  "fact_checks": [
+    {{
+      "claim": "A specific factual claim in the article",
+      "assessment": "supported",
+      "rationale": "Brief explanation of why"
+    }}
+  ],
+  "caveats": ["Any blind spots or limitations of your perspective on this topic"],
+  "axes": {{
+    "economic": 0.0,
+    "social": 0.0
+  }}
 }}
 
-The alignment_score should be between 0.0 and 1.0, where:
-- 0.0 = completely opposed to your political values
-- 0.5 = neutral or mixed
-- 1.0 = perfectly aligned with your political values
-
-Include 3-5 highlights as key points from your perspective.
+Field definitions:
+- stance_score: Liberty-Order axis, -3.0 (maximum liberty) to +3.0 (maximum order)
+- confidence: 0.0 to 1.0, how confident you are in your analysis
+- key_claims: 2-5 key claims or observations from your perspective
+- fact_checks: 1-3 fact checks of claims made in the article. Assessment must be one of: "supported", "contested", "unsupported", "unclear"
+- caveats: 1-2 honest admissions about blind spots in your perspective
+- axes.economic: -3 (more government intervention) to +3 (more free market)
+- axes.social: -3 (more libertarian/permissive) to +3 (more authoritarian/restrictive)
 
 Article:
 {content}"#
     );
 
-    let response_text = call_ollama(arch.system_prompt, &user_message).await?;
+    let response_text = call_ollama(persona.system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
 
-    let parsed: ParsedAnalysis = serde_json::from_str(json_text).with_context(|| {
+    let parsed: ParsedPersonaOutput = serde_json::from_str(json_text).with_context(|| {
         format!(
             "Failed to parse {} analysis response as JSON: {response_text}",
-            arch.kind.label()
+            persona.id.title()
         )
     })?;
 
-    let score = parsed.alignment_score.clamp(0.0, 1.0);
+    let fact_checks: Vec<FactCheck> = parsed
+        .fact_checks
+        .into_iter()
+        .map(|fc| FactCheck {
+            claim: fc.claim,
+            assessment: match fc.assessment.to_lowercase().as_str() {
+                "supported" => FactCheckAssessment::Supported,
+                "contested" => FactCheckAssessment::Contested,
+                "unsupported" => FactCheckAssessment::Unsupported,
+                _ => FactCheckAssessment::Unclear,
+            },
+            rationale: fc.rationale,
+        })
+        .collect();
 
-    Ok(ArchetypeAnalysis {
-        archetype: arch.kind,
+    let axes = parsed.axes.map(|a| Axes2D {
+        economic: a.economic.clamp(-3.0, 3.0),
+        social: a.social.clamp(-3.0, 3.0),
+    });
+
+    Ok(PersonaOutput {
+        id: persona.id,
+        title: persona_id.title().to_string(),
+        stance_score: parsed.stance_score.clamp(-3.0, 3.0),
+        confidence: parsed.confidence.clamp(0.0, 1.0),
         summary: parsed.summary,
-        highlights: parsed.highlights,
-        alignment_score: score,
+        key_claims: parsed.key_claims,
+        fact_checks,
+        caveats: parsed.caveats,
+        axes,
     })
 }
 
-/// Run analysis across all 5 political archetypes concurrently.
-/// Returns successful analyses even if some archetypes fail.
-pub async fn analyze_all_archetypes(content: &str) -> Result<Vec<ArchetypeAnalysis>> {
+/// Run analysis across all 8 political personas concurrently.
+/// Returns successful analyses even if some personas fail.
+pub async fn analyze_all_personas(content: &str) -> Result<Vec<PersonaOutput>> {
     let content = content.to_string();
-    let mut handles = Vec::with_capacity(5);
+    let mut handles = Vec::with_capacity(8);
 
-    for kind in ArchetypeKind::all() {
+    for persona_id in PersonaId::all() {
         let content = content.clone();
-        let kind = kind.clone();
+        let persona_id = persona_id.clone();
         handles.push(tokio::spawn(async move {
-            analyze_article(&content, &kind).await
+            analyze_persona(&content, &persona_id).await
         }));
     }
 
-    let mut analyses = Vec::with_capacity(5);
+    let mut outputs = Vec::with_capacity(8);
     for handle in handles {
         match handle.await {
-            Ok(Ok(analysis)) => analyses.push(analysis),
-            Ok(Err(e)) => tracing::error!("Archetype analysis failed: {e}"),
-            Err(e) => tracing::error!("Archetype analysis task panicked: {e}"),
+            Ok(Ok(output)) => outputs.push(output),
+            Ok(Err(e)) => tracing::error!("Persona analysis failed: {e}"),
+            Err(e) => tracing::error!("Persona analysis task panicked: {e}"),
         }
     }
 
-    if analyses.is_empty() {
-        anyhow::bail!("All archetype analyses failed");
+    if outputs.is_empty() {
+        anyhow::bail!("All persona analyses failed");
     }
 
-    Ok(analyses)
+    Ok(outputs)
 }
 
-/// Parsed synthesis response from the LLM.
-#[derive(Deserialize)]
-struct ParsedSynthesis {
-    synthesis: String,
-    commonalities: Vec<String>,
-}
+/// Synthesize a debiased summary from all persona perspectives.
+/// The spectrum_score is calculated as a confidence-weighted mean of stance scores,
+/// NOT generated by the LLM.
+pub async fn synthesize_debiased(personas: &[PersonaOutput]) -> Result<DebiasedSummary> {
+    let spectrum_score = weighted_spectrum_score(personas);
 
-/// Synthesize a balanced summary from all archetype perspectives.
-/// Returns both a narrative synthesis and a list of cross-spectrum commonalities.
-pub async fn synthesize_perspectives(analyses: &[ArchetypeAnalysis]) -> Result<SynthesisResult> {
-    let perspectives: Vec<String> = analyses
+    let perspectives: Vec<String> = personas
         .iter()
-        .map(|a| {
+        .map(|p| {
             format!(
-                "**{} perspective** (alignment: {:.0}%):\n{}\nKey points: {}",
-                a.archetype.label(),
-                a.alignment_score * 100.0,
-                a.summary,
-                a.highlights.join("; ")
+                "**{} perspective** (stance: {:.1}, confidence: {:.0}%):\n{}\nKey claims: {}\nCaveats: {}",
+                p.title,
+                p.stance_score,
+                p.confidence * 100.0,
+                p.summary,
+                p.key_claims.join("; "),
+                p.caveats.join("; ")
             )
         })
         .collect();
 
-    let system_prompt = r#"You are a balanced, non-partisan political analyst. Your role is to synthesize multiple political perspectives into a fair, nuanced overview. Do not favor any viewpoint. Present the key areas of agreement and disagreement across the political spectrum."#;
+    let system_prompt = r#"You are a balanced, non-partisan political analyst. Your role is to synthesize multiple political perspectives into a fair, nuanced, debiased overview. Do not favor any viewpoint. Identify where perspectives agree and disagree, and seek the truth that cuts across partisan lines."#;
 
     let user_message = format!(
-        r#"Below are analyses of the same article from 5 different political perspectives. Produce a synthesis with two parts:
+        r#"Below are analyses of the same article from 8 different political perspectives. The calculated spectrum placement (confidence-weighted mean of stance scores) is {spectrum_score:.2} on a -3 (Liberty) to +3 (Order) axis.
 
-1. A balanced 2-3 paragraph narrative summary that identifies where perspectives agree and disagree, highlights tensions and trade-offs, and helps the reader understand the full political landscape.
-
-2. A list of 3-5 "commonalities" — specific points where at least 3 of the 5 perspectives agree, even if for different reasons.
-
-Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
+Produce a debiased synthesis. Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
-  "synthesis": "Your 2-3 paragraph narrative here...",
-  "commonalities": [
-    "Point where multiple perspectives agree",
-    "Another shared concern or observation",
-    "A third area of cross-spectrum agreement"
-  ]
+  "consensus_points": ["Point where multiple perspectives agree", "Another shared observation"],
+  "disagreements": ["Key area of disagreement between perspectives"],
+  "likely_bias_drivers": ["Factor that may be driving biased framing in the original article"],
+  "truth_seeking_summary": "A 2-3 paragraph balanced summary that seeks truth across perspectives...",
+  "spectrum_explain": "Brief explanation of why the article lands at {spectrum_score:.2} on the Liberty-Order spectrum"
 }}
 
-{}"#,
-        perspectives.join("\n\n")
+Field definitions:
+- consensus_points: 3-5 points where at least half the perspectives agree
+- disagreements: 2-4 key areas where perspectives diverge
+- likely_bias_drivers: 1-3 factors that may bias the original article's framing
+- truth_seeking_summary: A balanced 2-3 paragraph narrative summary
+- spectrum_explain: Brief explanation of the spectrum placement (the score {spectrum_score:.2} is already calculated)
+
+{perspectives}"#,
+        perspectives = perspectives.join("\n\n")
     );
 
     let response_text = call_ollama(system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
 
-    let parsed: ParsedSynthesis = serde_json::from_str(json_text).with_context(|| {
-        format!("Failed to parse synthesis response as JSON: {response_text}")
+    let parsed: ParsedDebiased = serde_json::from_str(json_text).with_context(|| {
+        format!("Failed to parse debiased synthesis response as JSON: {response_text}")
     })?;
 
-    Ok(SynthesisResult {
-        synthesis: parsed.synthesis,
-        commonalities: parsed.commonalities,
+    Ok(DebiasedSummary {
+        consensus_points: parsed.consensus_points,
+        disagreements: parsed.disagreements,
+        likely_bias_drivers: parsed.likely_bias_drivers,
+        truth_seeking_summary: parsed.truth_seeking_summary,
+        spectrum_score,
+        spectrum_explain: parsed.spectrum_explain,
+    })
+}
+
+/// Full analysis pipeline: analyze with all personas, then debias.
+/// Returns a complete AnalysisResult ready for the client.
+pub async fn analyze_full(
+    content: &str,
+    title: &str,
+    source_url: Option<&str>,
+) -> Result<AnalysisResult> {
+    let personas = analyze_all_personas(content).await?;
+
+    let debiaser = synthesize_debiased(&personas).await.unwrap_or_else(|e| {
+        tracing::warn!("Debiased summary generation failed, using fallback: {e}");
+        let (weighted_sum, weight_sum) = personas.iter().fold((0.0_f64, 0.0_f64), |(ws, wt), p| {
+            (ws + p.stance_score * p.confidence, wt + p.confidence)
+        });
+        let spectrum_score = if weight_sum > 0.0 {
+            weighted_sum / weight_sum
+        } else {
+            0.0
+        };
+        DebiasedSummary {
+            consensus_points: vec![],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "Debiased summary could not be generated.".to_string(),
+            spectrum_score,
+            spectrum_explain: "Fallback: simple weighted mean of persona stance scores.".to_string(),
+        }
+    });
+
+    Ok(AnalysisResult {
+        title: title.to_string(),
+        source_url: source_url.map(|s| s.to_string()),
+        personas,
+        debiaser,
     })
 }
 
@@ -403,5 +571,206 @@ mod tests {
     #[test]
     fn is_retryable_false_for_success() {
         assert!(!is_retryable(reqwest::StatusCode::OK));
+    }
+
+    // --- Persona prompt tests ---
+
+    #[test]
+    fn all_personas_have_prompts() {
+        for persona_id in PersonaId::all() {
+            let persona = get_persona(persona_id);
+            assert!(
+                !persona.system_prompt.is_empty(),
+                "{:?} has empty system prompt",
+                persona_id
+            );
+            assert!(
+                persona.system_prompt.len() > 200,
+                "{:?} system prompt too short ({})",
+                persona_id,
+                persona.system_prompt.len()
+            );
+        }
+    }
+
+    #[test]
+    fn persona_prompts_are_unique() {
+        let prompts: Vec<&str> = PersonaId::all()
+            .iter()
+            .map(|id| get_persona(id).system_prompt)
+            .collect();
+        let mut deduped = prompts.clone();
+        deduped.sort();
+        deduped.dedup();
+        assert_eq!(
+            prompts.len(),
+            deduped.len(),
+            "Duplicate persona prompts found"
+        );
+    }
+
+    #[test]
+    fn persona_ids_match_definitions() {
+        for persona_id in PersonaId::all() {
+            let persona = get_persona(persona_id);
+            assert_eq!(
+                persona.id, *persona_id,
+                "Persona ID mismatch for {:?}",
+                persona_id
+            );
+        }
+    }
+
+    // --- Parsed struct deserialization tests ---
+
+    #[test]
+    fn parsed_persona_output_deserializes() {
+        let json = r#"{
+            "stance_score": -1.5,
+            "confidence": 0.8,
+            "summary": "Test summary.",
+            "key_claims": ["Claim 1"],
+            "fact_checks": [{"claim": "X", "assessment": "supported", "rationale": "Because Y"}],
+            "caveats": ["May miss Z"],
+            "axes": {"economic": -0.5, "social": 1.2}
+        }"#;
+        let parsed: ParsedPersonaOutput = serde_json::from_str(json).unwrap();
+        assert!((parsed.stance_score - (-1.5)).abs() < f64::EPSILON);
+        assert!((parsed.confidence - 0.8).abs() < f64::EPSILON);
+        assert_eq!(parsed.key_claims.len(), 1);
+        assert_eq!(parsed.fact_checks.len(), 1);
+        assert_eq!(parsed.caveats.len(), 1);
+        assert!(parsed.axes.is_some());
+    }
+
+    #[test]
+    fn parsed_persona_output_without_optional_fields() {
+        let json = r#"{
+            "stance_score": 2.0,
+            "confidence": 0.6,
+            "summary": "Security first.",
+            "key_claims": [],
+            "fact_checks": []
+        }"#;
+        let parsed: ParsedPersonaOutput = serde_json::from_str(json).unwrap();
+        assert!(parsed.axes.is_none());
+        assert!(parsed.caveats.is_empty());
+    }
+
+    #[test]
+    fn parsed_debiased_deserializes() {
+        let json = r#"{
+            "consensus_points": ["Point A"],
+            "disagreements": ["Disagree B"],
+            "likely_bias_drivers": ["Bias C"],
+            "truth_seeking_summary": "Balanced view.",
+            "spectrum_explain": "Leans liberty."
+        }"#;
+        let parsed: ParsedDebiased = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.consensus_points.len(), 1);
+        assert_eq!(parsed.disagreements.len(), 1);
+        assert_eq!(parsed.likely_bias_drivers.len(), 1);
+        assert_eq!(parsed.spectrum_explain, "Leans liberty.");
+    }
+
+    // --- Spectrum score calculation tests ---
+
+    fn make_persona(id: PersonaId, stance: f64, confidence: f64) -> PersonaOutput {
+        PersonaOutput {
+            id,
+            title: "Test".to_string(),
+            stance_score: stance,
+            confidence,
+            summary: String::new(),
+            key_claims: vec![],
+            fact_checks: vec![],
+            caveats: vec![],
+            axes: None,
+        }
+    }
+
+    #[test]
+    fn weighted_spectrum_score_symmetric() {
+        let personas = vec![
+            make_persona(PersonaId::ProgressiveActivist, -2.0, 0.5),
+            make_persona(PersonaId::NationalSecurityHawk, 2.0, 0.5),
+        ];
+        // (-2.0 * 0.5 + 2.0 * 0.5) / (0.5 + 0.5) = 0.0
+        assert!((weighted_spectrum_score(&personas) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weighted_spectrum_score_asymmetric_confidence() {
+        let personas = vec![
+            make_persona(PersonaId::ProgressiveActivist, -2.0, 0.8),
+            make_persona(PersonaId::NationalSecurityHawk, 2.0, 0.2),
+        ];
+        // (-2.0 * 0.8 + 2.0 * 0.2) / (0.8 + 0.2) = (-1.6 + 0.4) / 1.0 = -1.2
+        assert!((weighted_spectrum_score(&personas) - (-1.2)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weighted_spectrum_score_single_persona() {
+        let personas = vec![
+            make_persona(PersonaId::CentristTechnocrat, 0.1, 0.9),
+        ];
+        assert!((weighted_spectrum_score(&personas) - 0.1).abs() < 0.01);
+    }
+
+    #[test]
+    fn weighted_spectrum_score_zero_confidence_returns_zero() {
+        let personas = vec![
+            make_persona(PersonaId::ProgressiveActivist, -3.0, 0.0),
+            make_persona(PersonaId::NationalSecurityHawk, 3.0, 0.0),
+        ];
+        assert!((weighted_spectrum_score(&personas) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn weighted_spectrum_score_empty_returns_zero() {
+        assert!((weighted_spectrum_score(&[]) - 0.0).abs() < f64::EPSILON);
+    }
+
+    // --- Fact check assessment parsing ---
+
+    #[test]
+    fn fact_check_assessment_from_llm_strings() {
+        // Test the inline match in analyze_persona
+        assert_eq!(
+            match "supported".to_lowercase().as_str() {
+                "supported" => FactCheckAssessment::Supported,
+                "contested" => FactCheckAssessment::Contested,
+                "unsupported" => FactCheckAssessment::Unsupported,
+                _ => FactCheckAssessment::Unclear,
+            },
+            FactCheckAssessment::Supported
+        );
+        assert_eq!(
+            match "Contested".to_lowercase().as_str() {
+                "supported" => FactCheckAssessment::Supported,
+                "contested" => FactCheckAssessment::Contested,
+                "unsupported" => FactCheckAssessment::Unsupported,
+                _ => FactCheckAssessment::Unclear,
+            },
+            FactCheckAssessment::Contested
+        );
+        assert_eq!(
+            match "UNSUPPORTED".to_lowercase().as_str() {
+                "supported" => FactCheckAssessment::Supported,
+                "contested" => FactCheckAssessment::Contested,
+                "unsupported" => FactCheckAssessment::Unsupported,
+                _ => FactCheckAssessment::Unclear,
+            },
+            FactCheckAssessment::Unsupported
+        );
+        assert_eq!(
+            match "unknown".to_lowercase().as_str() {
+                "supported" => FactCheckAssessment::Supported,
+                "contested" => FactCheckAssessment::Contested,
+                "unsupported" => FactCheckAssessment::Unsupported,
+                _ => FactCheckAssessment::Unclear,
+            },
+            FactCheckAssessment::Unclear
+        );
     }
 }

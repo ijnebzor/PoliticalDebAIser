@@ -1,7 +1,7 @@
 # PoliticalDebAIser — Requirements Document
 
-**Version:** 2.0
-**Last Updated:** 2026-02-17
+**Version:** 3.0
+**Last Updated:** 2026-02-18
 **Project Lead:** Tiny Steve the Procrastinator
 **Client:** Friendji
 
@@ -9,7 +9,9 @@
 
 ## 1. Project Overview
 
-PoliticalDebAIser is a Rust-based web application that analyzes news articles and political content through 5 distinct political archetype lenses. It provides users with diverse ideological perspectives on any given article, highlights commonalities and differences, and offers a balanced synthesis.
+PoliticalDebAIser (a.k.a. "Debiaser") is a Rust-based web application that analyzes news articles and political content through 8 distinct political persona lenses. Each persona provides a stance score on a Liberty-Order axis, fact-checks key claims, flags caveats, and optionally plots on a 2D Economic vs Social axis grid. A "Debiaser" engine synthesizes all persona outputs into consensus points, disagreements, bias drivers, and a truth-seeking summary.
+
+**Reference:** `references/debiaser_webapp_MVPprototype.jsx` — Friendji's POC prototype (React/JSX). The production app layers this design over the existing Rust/Axum + Ollama infrastructure.
 
 ---
 
@@ -17,32 +19,48 @@ PoliticalDebAIser is a Rust-based web application that analyzes news articles an
 
 ### 2.1 Input
 - **R-001:** User provides a URL to a news article or political content
-- **R-002:** The application fetches and parses the article content from the URL
-- **R-003:** Invalid or unreachable URLs return clear error messages
+- **R-002:** User can alternatively paste raw article text directly
+- **R-003:** The application fetches and parses the article content from the URL
+- **R-004:** Invalid or unreachable URLs return clear error messages
 
-### 2.2 Political Archetypes
-The system analyzes content through 5 political perspectives:
+### 2.2 Political Personas (replaces Archetypes)
+The system analyzes content through 8 political persona lenses:
 
-| ID | Archetype | Description |
-|----|-----------|-------------|
-| **R-010** | Conservative | Limited government, free markets, traditional values, fiscal responsibility |
-| **R-011** | Democrat | Progressive governance, social equality, regulated capitalism, civil rights |
-| **R-012** | Socialist | Worker ownership, class solidarity, wealth redistribution, public services |
-| **R-013** | Dictatorship | Centralized authority, national unity, state-directed planning, social order |
-| **R-014** | Anarchist | Abolition of state, voluntary association, mutual aid, decentralization |
+| ID | Persona | Stance Tendency | Description |
+|----|---------|-----------------|-------------|
+| **R-010** | Progressive Activist | Liberty (-2.2) | Civil rights, disproportionate impacts, speech chilling effects |
+| **R-011** | Liberal Social Democrat | Liberty (-1.2) | Targeted measures with safeguards, proportionality, data minimisation |
+| **R-012** | Centrist Technocrat | Centre (0.1) | Measurable outcomes, KPIs, cost-benefit, sunset clauses |
+| **R-013** | Libertarian, Civil Liberties | Liberty (-2.6) | Privacy as fundamental liberty, mission creep, power asymmetry |
+| **R-014** | Conservative, Fiscal | Order (1.4) | Cost discipline, law-and-order, penalties for misuse |
+| **R-015** | National Security Hawk | Order (2.2) | Threat landscape, intelligence gaps, rapid response |
+| **R-016** | Environmentalist Green | Liberty (-0.8) | Energy footprint, activism chill, supply-chain risks |
+| **R-017** | Populist, Anti-elite | Order (1.0) | Suspicious of elites, corporate capture, equal application |
 
-### 2.3 Analysis Output
-- **R-020:** Each archetype produces a 2-3 sentence summary from its perspective
-- **R-021:** Each archetype identifies 3-5 key highlights/talking points
-- **R-022:** Each archetype rates the article's alignment to its values (0-100% score)
-- **R-023:** The system identifies commonalities shared across perspectives
-- **R-024:** A "Synthesize All Perspectives" button generates a balanced, unbiased take
+### 2.3 Per-Persona Analysis Output
+- **R-020:** Stance score on Liberty-Order axis (-3 to +3)
+- **R-021:** Confidence score (0.0 to 1.0)
+- **R-022:** 2-4 sentence summary from the persona's perspective
+- **R-023:** Key claims (list of strings)
+- **R-024:** Fact checks per claim: claim text, assessment (supported/contested/unsupported/unclear), rationale
+- **R-025:** Caveats (list of acknowledged blind spots or biases)
+- **R-026:** Optional 2D axes: economic score (-3 to +3) and social score (-3 to +3)
 
-### 2.4 Synthesis
-- **R-030:** Synthesis identifies areas of agreement and disagreement across archetypes
-- **R-031:** Synthesis highlights key tensions and trade-offs
-- **R-032:** Synthesis is non-partisan and does not favor any single perspective
-- **R-033:** Synthesis is generated on-demand (user clicks the button)
+### 2.4 Debiaser Synthesis (replaces Synthesis)
+- **R-030:** Consensus points: areas where most/all personas agree
+- **R-031:** Disagreements: key areas of conflict between personas
+- **R-032:** Likely bias drivers: identified framing biases in the original article
+- **R-033:** Truth-seeking summary: balanced multi-paragraph analysis
+- **R-034:** Spectrum score: weighted mean of persona stance scores (-3 to +3)
+- **R-035:** Spectrum explanation: text explaining the placement
+
+### 2.5 Visualisation
+- **R-040:** Political spectrum bar: Liberty (-3) to Order (+3) with animated marker
+- **R-041:** Disagreement meter: colour-coded bar based on std deviation of stance scores
+- **R-042:** Persona clustering: group personas by agreement on the stance axis (gap-based clustering)
+- **R-043:** 2D axis grid (toggle): Economic vs Social axes with persona dots and colour scale
+- **R-044:** Cluster blocks: personas grouped visually with gradient banding and span info
+- **R-045:** Progress loader: visible loading indicator during analysis
 
 ---
 
@@ -53,68 +71,100 @@ The system analyzes content through 5 political perspectives:
 - **T-002:** Runs on port 3000 (configurable)
 - **T-003:** Serves static frontend files via tower-http
 - **T-004:** CORS enabled for development
+- **T-005:** Combined AppState with article cache and analysis store
 
 ### 3.2 LLM Integration
 - **T-010:** Uses Ollama for local model inference (switchable)
 - **T-011:** Ollama URL configurable via OLLAMA_URL env var (default: http://localhost:11434)
 - **T-012:** Model configurable via OLLAMA_MODEL env var (default: llama3.2)
 - **T-013:** No external API keys required for base operation
+- **T-014:** Structured JSON output from LLM (with fence stripping fallback)
+- **T-015:** Parallel persona analysis (all 8 run concurrently)
+- **T-016:** Retry logic for transient Ollama failures (up to 2 retries)
 
 ### 3.3 Content Scraping
-- **T-020:** Fetches article HTML via reqwest with timeout
-- **T-021:** Extracts title from `<title>` tag with `<h1>` fallback
-- **T-022:** Extracts body text from `<article>`, `<main>`, or `<p>` tags
-- **T-023:** Strips HTML, collapses whitespace, returns clean text
-- **T-024:** Extracts meta description when available
+- **T-020:** Fetches article HTML via reqwest with 30s timeout
+- **T-021:** Extracts title from og:title, then `<title>`, then `<h1>` (priority order)
+- **T-022:** Readability-style content extraction with scoring heuristic
+- **T-023:** Strips nav/footer/sidebar/ads/scripts before extraction
+- **T-024:** Content node scoring: text density + paragraph count
+- **T-025:** Supports plain text input (bypass scraping)
 
 ### 3.4 API Endpoints
 - **T-030:** `GET /` — Serves the main HTML page
-- **T-031:** `POST /analyze` — Accepts `{"url": "..."}`, returns archetype analyses
-- **T-032:** `POST /synthesize` — Accepts analyses, returns balanced synthesis
-- **T-033:** `GET /static/*` — Serves CSS, JS, and other static assets
+- **T-031:** `POST /analyze` — Accepts `{"url": "..."}`, returns persona analyses + debiaser output
+- **T-032:** `POST /analyze-text` — Accepts `{"text": "...", "title": "..."}`, same analysis without scraping
+- **T-033:** `POST /synthesize` — Accepts persona analyses, returns debiaser synthesis
+- **T-034:** `GET /static/*` — Serves CSS, JS, and other static assets
+- **T-035:** `GET /health` — Health check endpoint
+- **T-036:** `POST /history` — Store a completed analysis, returns short ID
+- **T-037:** `GET /history` — List all stored analyses
+- **T-038:** `GET /history/:id` — Retrieve stored analysis by ID
+- **T-039:** `DELETE /history/:id` — Remove stored analysis
 
 ### 3.5 Frontend
-- **T-040:** Single-page application (HTML/CSS/JS)
-- **T-041:** Dark professional theme
+- **T-040:** Single-page application (HTML/CSS/JS, no React — vanilla JS)
+- **T-041:** Clean, light professional theme (white/gray, per prototype)
 - **T-042:** Responsive design (mobile and desktop)
-- **T-043:** 5 color-coded archetype cards in a grid layout
-- **T-044:** Animated alignment score bars
-- **T-045:** Loading states with skeleton placeholders
-- **T-046:** XSS protection via HTML escaping
-- **T-047:** Error banners with specific messages
+- **T-043:** 8 persona cards with persona clustering layout
+- **T-044:** Animated spectrum bar (Liberty-Order axis)
+- **T-045:** Disagreement meter with colour coding (low/medium/high)
+- **T-046:** 2D axis grid toggle (Economic vs Social)
+- **T-047:** Skeleton loading placeholders during analysis
+- **T-048:** XSS protection via HTML escaping
+- **T-049:** Error banners with specific messages and retry
+- **T-050:** History sidebar with localStorage persistence
+- **T-051:** Compare mode (side-by-side articles)
+- **T-052:** Export (JSON + text) and Share Link
+- **T-053:** URL and text input tabs
 
 ---
 
-## 4. v2 Enhancements (In Progress)
+## 4. Data Structures
 
-### 4.1 Performance
-- **V2-001:** Parallel archetype analysis (all 5 run concurrently)
-- **V2-002:** In-memory article caching (avoid re-scraping same URL)
-- **V2-003:** Retry logic for transient Ollama failures (up to 2 retries)
+### 4.1 PersonaOutput (replaces ArchetypeAnalysis)
+```
+PersonaOutput {
+  id: PersonaId,          // e.g. "progressive_activist"
+  title: String,          // e.g. "Progressive Activist"
+  stance_score: f64,      // -3.0 to +3.0 (Liberty-Order)
+  confidence: f64,        // 0.0 to 1.0
+  summary: String,        // 2-4 sentences
+  key_claims: Vec<String>,
+  fact_checks: Vec<FactCheck>,
+  caveats: Vec<String>,
+  axes: Option<Axes2D>,   // { economic: f64, social: f64 }
+}
+```
 
-### 4.2 Reliability
-- **V2-010:** Structured JSON error responses with appropriate HTTP status codes
-- **V2-011:** Request timeout on article fetching (30s)
-- **V2-012:** JSON extraction fallback (strip markdown code fences from LLM responses)
+### 4.2 DebiasedSummary (replaces SynthesisResponse)
+```
+DebiasedSummary {
+  consensus_points: Vec<String>,
+  disagreements: Vec<String>,
+  likely_bias_drivers: Vec<String>,
+  truth_seeking_summary: String,
+  spectrum_score: f64,     // -3.0 to +3.0
+  spectrum_explain: String,
+}
+```
 
-### 4.3 Deployment
-- **V2-020:** Dockerfile with multi-stage build
-- **V2-021:** docker-compose.yml with app + Ollama services
-- **V2-022:** .dockerignore for clean builds
-
-### 4.4 Frontend Polish
-- **V2-030:** Skeleton loading cards with shimmer animation
-- **V2-031:** Fade-in animations on card appearance
-- **V2-032:** Copy-to-clipboard on synthesis result
-- **V2-033:** Retry button on errors
-- **V2-034:** Specific error messages (Ollama down, invalid URL, parse failure)
+### 4.3 AnalysisResult (replaces AnalysisResponse)
+```
+AnalysisResult {
+  title: String,
+  source_url: Option<String>,
+  personas: Vec<PersonaOutput>,
+  debiaser: DebiasedSummary,
+}
+```
 
 ---
 
 ## 5. Quality Requirements
 
 - **Q-001:** All code compiles with zero warnings
-- **Q-002:** Minimum 36 tests passing (unit + integration)
+- **Q-002:** Comprehensive test suite (unit + integration)
 - **Q-003:** No raw `unwrap()` on network operations
 - **Q-004:** Proper error propagation with `anyhow::Context`
 - **Q-005:** XSS protection on all user-facing content
@@ -141,4 +191,5 @@ OLLAMA_MODEL=llama3.2               # Model to use for analysis
 |------|---------|---------|
 | 2026-02-17 | 1.0 | Initial project — 5 archetypes, Anthropic Claude API, basic UI |
 | 2026-02-17 | 1.1 | Switched from Anthropic API to Ollama local model inference |
-| 2026-02-17 | 2.0 (WIP) | Parallel analysis, caching, Docker, frontend polish |
+| 2026-02-17 | 2.0 | Parallel analysis, caching, Docker, frontend polish, Stage 1 features |
+| 2026-02-18 | 3.0 | Major redesign: 8 personas, stance scoring, fact-checking, 2D axes, debiaser synthesis, per Friendji prototype |
