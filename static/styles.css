@@ -1,0 +1,633 @@
+/* PoliticalDebAIser — Main Stylesheet */
+
+:root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #1a1d28;
+  --bg-card: #22263a;
+  --text-primary: #e8eaf0;
+  --text-secondary: #9ca3af;
+  --text-muted: #6b7280;
+  --border-color: #2d3348;
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+
+  /* Archetype colors */
+  --conservative: #3b82f6;
+  --democrat: #60a5fa;
+  --socialist: #ef4444;
+  --dictatorship: #6b7280;
+  --anarchist: #1f2937;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+/* ── Layout ── */
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+/* ── Header ── */
+
+header {
+  text-align: center;
+  padding: 3rem 0 2rem;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 2.5rem;
+}
+
+header h1 {
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+header p {
+  color: var(--text-secondary);
+  font-size: 1.1rem;
+  margin-top: 0.5rem;
+}
+
+/* ── Input Area ── */
+
+.input-area {
+  display: flex;
+  gap: 0.75rem;
+  max-width: 700px;
+  margin: 0 auto 2.5rem;
+}
+
+.input-area input[type="text"] {
+  flex: 1;
+  padding: 0.85rem 1.15rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-area input[type="text"]::placeholder {
+  color: var(--text-muted);
+}
+
+.input-area input[type="text"]:focus {
+  border-color: var(--accent);
+}
+
+.btn {
+  padding: 0.85rem 1.75rem;
+  border-radius: 0.5rem;
+  border: none;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Error Banner ── */
+
+.error-banner {
+  display: none;
+  max-width: 700px;
+  margin: 0 auto 2rem;
+  padding: 1.15rem 1.25rem;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: 0.5rem;
+}
+
+.error-banner.active {
+  display: block;
+}
+
+.error-banner-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+
+.error-banner-icon {
+  font-size: 1.1rem;
+}
+
+.error-banner-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fca5a5;
+}
+
+.error-banner-body {
+  color: #d4a0a0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin-bottom: 0.75rem;
+}
+
+.error-banner-hint {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-bottom: 0.75rem;
+  font-style: italic;
+}
+
+.btn-retry {
+  padding: 0.5rem 1.25rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-retry:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* ── Skeleton Cards ── */
+
+.skeleton-grid {
+  display: none;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+.skeleton-grid.active {
+  display: grid;
+}
+
+.skeleton-card {
+  background: var(--bg-card);
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  padding: 1.5rem;
+  overflow: hidden;
+}
+
+.skeleton-line {
+  background: var(--bg-primary);
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.skeleton-line::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.skeleton-accent {
+  height: 3px;
+  border-radius: 2px;
+  margin-bottom: 1rem;
+  width: 100%;
+}
+
+.skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.skeleton-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.5rem;
+}
+
+.skeleton-title {
+  height: 1.1rem;
+  width: 60%;
+}
+
+.skeleton-text {
+  height: 0.85rem;
+  margin-bottom: 0.6rem;
+}
+
+.skeleton-text:nth-child(1) { width: 100%; }
+.skeleton-text:nth-child(2) { width: 90%; }
+.skeleton-text:nth-child(3) { width: 75%; }
+
+.skeleton-bullet {
+  height: 0.75rem;
+  margin-bottom: 0.5rem;
+  margin-left: 1rem;
+}
+
+.skeleton-bullet:nth-child(1) { width: 80%; }
+.skeleton-bullet:nth-child(2) { width: 65%; }
+.skeleton-bullet:nth-child(3) { width: 70%; }
+
+.skeleton-bar {
+  height: 8px;
+  width: 100%;
+  margin-top: 1rem;
+  border-radius: 4px;
+}
+
+/* ── Article Info ── */
+
+.article-info {
+  display: none;
+  max-width: 700px;
+  margin: 0 auto 2rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--bg-secondary);
+  border-radius: 0.5rem;
+  border: 1px solid var(--border-color);
+}
+
+.article-info.active {
+  display: block;
+}
+
+.article-info h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.35rem;
+}
+
+.article-source {
+  display: inline-block;
+  color: var(--accent);
+  font-size: 0.82rem;
+  margin-bottom: 0.5rem;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.article-source:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
+.article-info p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+/* ── Results Grid ── */
+
+.results {
+  display: none;
+}
+
+.results.active {
+  display: block;
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2.5rem;
+}
+
+/* ── Archetype Card ── */
+
+.card {
+  background: var(--bg-card);
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  padding: 1.5rem;
+  transition: transform 0.2s, box-shadow 0.2s;
+  opacity: 0;
+  animation: cardFadeIn 0.4s ease-out forwards;
+}
+
+.card:nth-child(1) { animation-delay: 0s; }
+.card:nth-child(2) { animation-delay: 0.08s; }
+.card:nth-child(3) { animation-delay: 0.16s; }
+.card:nth-child(4) { animation-delay: 0.24s; }
+.card:nth-child(5) { animation-delay: 0.32s; }
+
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.card-icon {
+  font-size: 1.75rem;
+  width: 2.5rem;
+  text-align: center;
+}
+
+.card-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+/* Archetype accent stripe */
+.card .card-accent {
+  height: 3px;
+  border-radius: 2px;
+  margin-bottom: 1rem;
+}
+
+.card[data-archetype="conservative"] .card-accent { background: var(--conservative); }
+.card[data-archetype="democrat"] .card-accent { background: var(--democrat); }
+.card[data-archetype="socialist"] .card-accent { background: var(--socialist); }
+.card[data-archetype="dictatorship"] .card-accent { background: var(--dictatorship); }
+.card[data-archetype="anarchist"] .card-accent { background: var(--anarchist); }
+
+.card[data-archetype="conservative"] .card-title { color: var(--conservative); }
+.card[data-archetype="democrat"] .card-title { color: var(--democrat); }
+.card[data-archetype="socialist"] .card-title { color: var(--socialist); }
+.card[data-archetype="dictatorship"] .card-title { color: var(--dictatorship); }
+.card[data-archetype="anarchist"] .card-title { color: var(--anarchist); }
+
+.card-summary {
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  margin-bottom: 1rem;
+  line-height: 1.65;
+}
+
+.card-highlights {
+  list-style: none;
+  margin-bottom: 1.25rem;
+}
+
+.card-highlights li {
+  position: relative;
+  padding-left: 1.15rem;
+  margin-bottom: 0.4rem;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.card-highlights li::before {
+  content: '\2022';
+  position: absolute;
+  left: 0;
+  color: var(--text-muted);
+}
+
+/* Score meter */
+.score-bar-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.score-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.score-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.score-bar-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.6s ease-out;
+  width: 0;
+}
+
+.card[data-archetype="conservative"] .score-bar-fill { background: var(--conservative); }
+.card[data-archetype="democrat"] .score-bar-fill { background: var(--democrat); }
+.card[data-archetype="socialist"] .score-bar-fill { background: var(--socialist); }
+.card[data-archetype="dictatorship"] .score-bar-fill { background: var(--dictatorship); }
+.card[data-archetype="anarchist"] .score-bar-fill { background: var(--anarchist); }
+
+.score-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 3rem;
+  text-align: right;
+}
+
+/* ── Commonalities Section ── */
+
+.commonalities {
+  display: none;
+  background: var(--bg-secondary);
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.commonalities.active {
+  display: block;
+}
+
+.commonalities h3 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
+
+.commonalities p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+
+/* ── Synthesis ── */
+
+.synthesize-area {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.btn-synthesize {
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  color: #fff;
+  padding: 1rem 2.5rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  border: none;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-synthesize:hover {
+  opacity: 0.9;
+}
+
+.btn-synthesize:active {
+  transform: scale(0.97);
+}
+
+.btn-synthesize:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.synthesis-result {
+  display: none;
+  background: var(--bg-secondary);
+  border-radius: 0.75rem;
+  border: 1px solid var(--border-color);
+  padding: 1.75rem;
+  margin-bottom: 3rem;
+  position: relative;
+}
+
+.synthesis-result.active {
+  display: block;
+}
+
+.synthesis-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.synthesis-result-header h3 {
+  font-size: 1.15rem;
+  background: linear-gradient(135deg, var(--accent), #a78bfa);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.btn-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 0.35rem;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.btn-copy:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.btn-copy.copied {
+  color: #34d399;
+  border-color: #34d399;
+}
+
+.btn-copy svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.synthesis-result p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+/* ── Footer ── */
+
+footer {
+  text-align: center;
+  padding: 2rem 0;
+  border-top: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 768px) {
+  header h1 {
+    font-size: 1.75rem;
+  }
+
+  header p {
+    font-size: 0.95rem;
+  }
+
+  .input-area {
+    flex-direction: column;
+  }
+
+  .cards-grid,
+  .skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-synthesize {
+    width: 100%;
+  }
+}

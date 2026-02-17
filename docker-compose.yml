@@ -1,0 +1,40 @@
+# PoliticalDebAIser — Docker Compose
+# Runs the web app alongside a local Ollama instance for LLM inference.
+
+services:
+  # --------------------------------------------------------------------------
+  # web: the PoliticalDebAIser Axum server
+  # --------------------------------------------------------------------------
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Point at the compose ollama service (not host.docker.internal)
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      RUST_LOG: ${RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # --------------------------------------------------------------------------
+  # ollama: local LLM inference server
+  # --------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persist downloaded models across container restarts
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_models:

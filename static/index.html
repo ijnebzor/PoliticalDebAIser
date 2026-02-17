@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PoliticalDebAIser</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <header>
+      <h1>PoliticalDebAIser</h1>
+      <p>Analyze any news article through 5 political archetype lenses and discover balanced insight.</p>
+    </header>
+
+    <!-- URL Input -->
+    <form id="analyze-form" class="input-area">
+      <input
+        type="text"
+        id="url-input"
+        placeholder="Paste an article URL here…"
+        autocomplete="off"
+        required
+      />
+      <button type="submit" id="analyze-btn" class="btn btn-primary">Analyze</button>
+    </form>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner">
+      <div class="error-banner-header">
+        <span class="error-banner-icon">&#9888;</span>
+        <span id="error-title" class="error-banner-title"></span>
+      </div>
+      <p id="error-body" class="error-banner-body"></p>
+      <p id="error-hint" class="error-banner-hint"></p>
+      <button id="retry-btn" class="btn-retry">Retry</button>
+    </div>
+
+    <!-- Skeleton Loading -->
+    <div id="skeleton-grid" class="skeleton-grid"></div>
+
+    <!-- Article Info -->
+    <div id="article-info" class="article-info">
+      <h2 id="article-title"></h2>
+      <a id="article-source" class="article-source" href="#" target="_blank" rel="noopener noreferrer"></a>
+      <p id="article-summary-text"></p>
+    </div>
+
+    <!-- Results -->
+    <section id="results" class="results">
+
+      <!-- Archetype Cards -->
+      <div id="cards-grid" class="cards-grid"></div>
+
+      <!-- Commonalities -->
+      <div id="commonalities" class="commonalities">
+        <h3>Shared Across Perspectives</h3>
+        <p id="commonalities-text"></p>
+      </div>
+
+      <!-- Synthesize -->
+      <div id="synthesize-area" class="synthesize-area">
+        <button id="synthesize-btn" class="btn-synthesize">
+          Synthesize All Perspectives
+        </button>
+      </div>
+
+      <!-- Synthesis Result -->
+      <div id="synthesis-result" class="synthesis-result">
+        <div class="synthesis-result-header">
+          <h3>Balanced Synthesis</h3>
+          <button id="copy-btn" class="btn-copy" title="Copy to clipboard">
+            <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
+        </div>
+        <p id="synthesis-text"></p>
+      </div>
+
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      PoliticalDebAIser &mdash; See every side of the story.
+    </footer>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
