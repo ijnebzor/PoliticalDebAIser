@@ -41,8 +41,8 @@ use axum::response::{Html, IntoResponse, Json, Response};
 
 use crate::archetypes;
 use crate::models::{
-    AnalysisRequest, AnalysisResult, AppState, ErrorResponse, HistoryListItem,
-    StoredAnalysis, StoreHistoryRequest, StoreHistoryResponse,
+    AnalysisRequest, AnalysisResult, AppState, DebiasedSummary, ErrorResponse, HistoryListItem,
+    PersonaOutput, StoredAnalysis, StoreHistoryRequest, StoreHistoryResponse,
     TextAnalysisRequest, generate_short_id,
 };
 use crate::scraper::{extract_from_text, scrape_article, ScrapeError};
@@ -131,6 +131,30 @@ fn analysis_err(e: anyhow::Error) -> ApiError {
     }
 }
 
+/// Build a fallback DebiasedSummary when LLM synthesis fails.
+/// Uses confidence-weighted mean of persona stance scores.
+fn fallback_debiaser(personas: &[PersonaOutput]) -> DebiasedSummary {
+    let (weighted_sum, weight_sum) =
+        personas
+            .iter()
+            .fold((0.0_f64, 0.0_f64), |(ws, wt), p| {
+                (ws + p.stance_score * p.confidence, wt + p.confidence)
+            });
+    let spectrum_score = if weight_sum > 0.0 {
+        (weighted_sum / weight_sum * 100.0).round() / 100.0
+    } else {
+        0.0
+    };
+    DebiasedSummary {
+        consensus_points: vec![],
+        disagreements: vec![],
+        likely_bias_drivers: vec![],
+        truth_seeking_summary: "Debiased summary could not be generated.".to_string(),
+        spectrum_score,
+        spectrum_explain: "Fallback: simple weighted mean of persona stance scores.".to_string(),
+    }
+}
+
 /// GET /health — lightweight health check for Docker and monitoring.
 pub async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status": "ok"}))
@@ -148,19 +172,30 @@ pub async fn analyze(
 ) -> Result<Json<AnalysisResult>, ApiError> {
     let article = scrape_article(&payload.url, &state.cache).await.map_err(scrape_err)?;
 
-    let personas = archetypes::analyze_all_personas(&article.body_text)
+    let result = archetypes::analyze_all_personas(&article.body_text)
         .await
         .map_err(analysis_err)?;
 
-    let debiaser = archetypes::synthesize_debiased(&personas)
+    let mut warnings: Vec<String> = result
+        .failed
+        .iter()
+        .map(|name| format!("{name} analysis failed"))
+        .collect();
+
+    let debiaser = archetypes::synthesize_debiased(&result.outputs)
         .await
-        .map_err(analysis_err)?;
+        .unwrap_or_else(|e| {
+            tracing::warn!("Debiased synthesis failed, using fallback: {e}");
+            warnings.push("Debiased synthesis failed — using fallback".to_string());
+            fallback_debiaser(&result.outputs)
+        });
 
     Ok(Json(AnalysisResult {
         title: article.title,
         source_url: Some(payload.url),
-        personas,
+        personas: result.outputs,
         debiaser,
+        warnings,
     }))
 }
 
@@ -189,19 +224,30 @@ pub async fn analyze_text(
 
     let article = extract_from_text(&payload.text, payload.title.as_deref());
 
-    let personas = archetypes::analyze_all_personas(&article.body_text)
+    let result = archetypes::analyze_all_personas(&article.body_text)
         .await
         .map_err(analysis_err)?;
 
-    let debiaser = archetypes::synthesize_debiased(&personas)
+    let mut warnings: Vec<String> = result
+        .failed
+        .iter()
+        .map(|name| format!("{name} analysis failed"))
+        .collect();
+
+    let debiaser = archetypes::synthesize_debiased(&result.outputs)
         .await
-        .map_err(analysis_err)?;
+        .unwrap_or_else(|e| {
+            tracing::warn!("Debiased synthesis failed, using fallback: {e}");
+            warnings.push("Debiased synthesis failed — using fallback".to_string());
+            fallback_debiaser(&result.outputs)
+        });
 
     Ok(Json(AnalysisResult {
         title: article.title,
         source_url: None,
-        personas,
+        personas: result.outputs,
         debiaser,
+        warnings,
     }))
 }
 
@@ -222,7 +268,7 @@ pub async fn store_analysis(
 
     {
         let mut store = state.store.write().await;
-        store.insert(id.clone(), stored);
+        store.put(id.clone(), stored);
     }
 
     Ok((
@@ -240,8 +286,8 @@ pub async fn list_history(
 ) -> Json<Vec<HistoryListItem>> {
     let store = state.store.read().await;
     let mut items: Vec<HistoryListItem> = store
-        .values()
-        .map(|s| HistoryListItem {
+        .iter()
+        .map(|(_, s)| HistoryListItem {
             id: s.id.clone(),
             article_title: s.response.title.clone(),
             source_url: s.source_url.clone(),
@@ -259,7 +305,7 @@ pub async fn delete_history(
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
     let mut store = state.store.write().await;
-    if store.remove(&id).is_some() {
+    if store.pop(&id).is_some() {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError {
@@ -275,7 +321,7 @@ pub async fn get_analysis(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<StoredAnalysis>, ApiError> {
-    let store = state.store.read().await;
+    let mut store = state.store.write().await;
     store.get(&id).cloned().map(Json).ok_or_else(|| ApiError {
         status: StatusCode::NOT_FOUND,
         error: "Analysis not found".to_string(),

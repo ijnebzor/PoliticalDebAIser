@@ -4,3 +4,7 @@ target/
 .claude/
 *.md
 tests/
+.gitignore
+.dockerignore
+references/
+templates/

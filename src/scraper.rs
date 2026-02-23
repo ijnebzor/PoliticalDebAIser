@@ -30,8 +30,16 @@ fn is_private_ip(ip: &IpAddr) -> bool {
     }
 }
 
+/// Resolved URL target: hostname + validated IP address to pin requests against DNS rebinding.
+struct ResolvedTarget {
+    host: String,
+    port: u16,
+    ip: IpAddr,
+}
+
 /// Validate that a URL does not target private/internal network addresses (SSRF protection).
-fn validate_url_target(url: &str) -> Result<(), ScrapeError> {
+/// Returns the resolved IP so callers can pin the connection, preventing TOCTOU DNS rebinding.
+fn validate_url_target(url: &str) -> Result<ResolvedTarget, ScrapeError> {
     let parsed = url::Url::parse(url)
         .map_err(|_| ScrapeError::InvalidUrl("Malformed URL".to_string()))?;
 
@@ -39,7 +47,20 @@ fn validate_url_target(url: &str) -> Result<(), ScrapeError> {
         .host_str()
         .ok_or_else(|| ScrapeError::InvalidUrl("URL has no host".to_string()))?;
 
-    // Block common internal hostnames
+    validate_hostname(host)?;
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let ip = resolve_and_validate(host, port)?;
+
+    Ok(ResolvedTarget {
+        host: host.to_string(),
+        port,
+        ip,
+    })
+}
+
+/// Block common internal/private hostnames.
+fn validate_hostname(host: &str) -> Result<(), ScrapeError> {
     let host_lower = host.to_lowercase();
     if host_lower == "localhost"
         || host_lower.ends_with(".local")
@@ -51,21 +72,65 @@ fn validate_url_target(url: &str) -> Result<(), ScrapeError> {
             "URLs targeting internal/private hosts are not allowed".to_string(),
         ));
     }
+    Ok(())
+}
 
-    // Try to resolve the hostname and check if any resolved IP is private
-    let port = parsed.port().unwrap_or(80);
+/// Resolve hostname to IP and validate none are private. Returns the first public IP.
+fn resolve_and_validate(host: &str, port: u16) -> Result<IpAddr, ScrapeError> {
     let addr_str = format!("{host}:{port}");
-    if let Ok(addrs) = addr_str.to_socket_addrs() {
-        for addr in addrs {
-            if is_private_ip(&addr.ip()) {
-                return Err(ScrapeError::InvalidUrl(
-                    "URLs resolving to private/internal IP addresses are not allowed".to_string(),
-                ));
-            }
+    let addrs: Vec<_> = addr_str
+        .to_socket_addrs()
+        .map_err(|_| ScrapeError::InvalidUrl(format!("Could not resolve hostname: {host}")))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(ScrapeError::InvalidUrl(format!(
+            "Hostname resolved to no addresses: {host}"
+        )));
+    }
+
+    for addr in &addrs {
+        if is_private_ip(&addr.ip()) {
+            return Err(ScrapeError::InvalidUrl(
+                "URLs resolving to private/internal IP addresses are not allowed".to_string(),
+            ));
         }
     }
 
-    Ok(())
+    Ok(addrs[0].ip())
+}
+
+/// Build a reqwest client pinned to a specific resolved IP, preventing DNS rebinding.
+/// Also installs a redirect policy that validates each redirect target against SSRF rules.
+fn build_pinned_client(target: &ResolvedTarget) -> Result<reqwest::Client, ScrapeError> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        // Pin DNS: force this hostname to resolve to the validated IP
+        .resolve(
+            &target.host,
+            std::net::SocketAddr::new(target.ip, target.port),
+        )
+        // Custom redirect policy: validate each redirect target against SSRF rules
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                attempt.error("too many redirects")
+            } else if let Some(redirect_host) = attempt.url().host_str() {
+                // Validate the redirect hostname
+                if validate_hostname(redirect_host).is_err() {
+                    return attempt.error("redirect to private/internal host blocked");
+                }
+                // Validate the redirect IP
+                let port = attempt.url().port_or_known_default().unwrap_or(80);
+                if resolve_and_validate(redirect_host, port).is_err() {
+                    return attempt.error("redirect to private/internal IP blocked");
+                }
+                attempt.follow()
+            } else {
+                attempt.error("redirect URL has no host")
+            }
+        }))
+        .build()
+        .map_err(|e| ScrapeError::FetchFailed(e.to_string()))
 }
 
 /// Common paywall indicator strings found in page content.
@@ -122,23 +187,23 @@ pub async fn scrape_article(
         ));
     }
 
-    // SSRF protection: block requests to private/internal networks
-    validate_url_target(url)?;
+    // SSRF protection: resolve DNS once and pin the IP to prevent TOCTOU rebinding
+    let target = validate_url_target(url)?;
 
-    // Check cache
+    // Check cache (write lock needed for LRU access-order update)
     {
-        let cache_read = cache.read().await;
-        if let Some(cached) = cache_read.get(url) {
+        let mut cache_lock = cache.write().await;
+        if let Some(cached) = cache_lock.get(url) {
             return Ok(cached.clone());
         }
     }
 
-    // Try fetching the article directly first
-    match fetch_and_parse(url).await {
+    // Try fetching the article directly first (pinned to validated IP)
+    match fetch_and_parse(url, &target).await {
         Ok(article) => {
             // Store in cache
             let mut cache_write = cache.write().await;
-            cache_write.insert(url.to_string(), article.clone());
+            cache_write.put(url.to_string(), article.clone());
             Ok(article)
         }
         Err(ScrapeError::Paywall) => {
@@ -151,7 +216,7 @@ pub async fn scrape_article(
                     article.disclaimer = Some(ARCHIVE_DISCLAIMER.to_string());
                     // Cache the archive.ph result under the original URL
                     let mut cache_write = cache.write().await;
-                    cache_write.insert(url.to_string(), article.clone());
+                    cache_write.put(url.to_string(), article.clone());
                     Ok(article)
                 }
                 Err(archive_err) => {
@@ -167,11 +232,9 @@ pub async fn scrape_article(
 }
 
 /// Fetch a URL and parse its HTML into ArticleContent.
-async fn fetch_and_parse(url: &str) -> Result<ArticleContent, ScrapeError> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| ScrapeError::FetchFailed(e.to_string()))?;
+/// Uses a pinned client to prevent DNS rebinding TOCTOU attacks.
+async fn fetch_and_parse(url: &str, target: &ResolvedTarget) -> Result<ArticleContent, ScrapeError> {
+    let client = build_pinned_client(target)?;
 
     let response = client.get(url).send().await.map_err(|e| {
         if e.is_timeout() {
@@ -674,7 +737,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
+                lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap()),
             ));
             let result = scrape_article("not-a-url", &cache).await;
             assert!(result.is_err());
@@ -690,7 +753,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
+                lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap()),
             ));
             let result = scrape_article("ftp://example.com/file", &cache).await;
             assert!(result.is_err());
@@ -706,7 +769,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
+                lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap()),
             ));
             let result = scrape_article("", &cache).await;
             assert!(result.is_err());
@@ -722,7 +785,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
+                lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap()),
             ));
             let result = scrape_article("javascript:alert(1)", &cache).await;
             assert!(result.is_err());
@@ -738,7 +801,7 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-                std::collections::HashMap::new(),
+                lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap()),
             ));
 
             // Pre-populate the cache
@@ -752,7 +815,7 @@ mod tests {
             };
             {
                 let mut cache_write = cache.write().await;
-                cache_write.insert("https://example.com/cached".to_string(), article.clone());
+                cache_write.put("https://example.com/cached".to_string(), article.clone());
             }
 
             // Fetch should hit the cache (no network call)

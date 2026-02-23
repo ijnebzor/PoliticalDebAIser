@@ -18,7 +18,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 url = "2"
 rand = "0.8"
+lru = "0.16.3"
+tower_governor = { version = "0.8", features = ["axum"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+wiremock = "0.6"
+serial_test = "3"

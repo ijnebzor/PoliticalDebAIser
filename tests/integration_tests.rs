@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing;
 use axum::Router;
 use http_body_util::BodyExt;
-use tokio::sync::RwLock;
 use tower::ServiceExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
@@ -91,10 +87,10 @@ fn app_with_state() -> Router {
     use political_debaiser::models::AppState;
     use political_debaiser::routes;
 
-    let state = AppState {
-        cache: Arc::new(RwLock::new(HashMap::new())),
-        store: Arc::new(RwLock::new(HashMap::new())),
-    };
+    let state = AppState::new(
+        political_debaiser::models::DEFAULT_CACHE_SIZE,
+        political_debaiser::models::DEFAULT_STORE_SIZE,
+    );
 
     Router::new()
         .route("/health", routing::get(routes::health))

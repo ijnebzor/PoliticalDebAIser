@@ -550,13 +550,18 @@ header p {
 
 .skeleton-grid {
   display: none;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
   margin-bottom: 2rem;
 }
 
 .skeleton-grid.active {
   display: grid;
+}
+
+.skeleton-grid .persona-card.loading {
+  opacity: 1;
+  animation: none;
 }
 
 .skeleton-card {
@@ -983,6 +988,28 @@ header p {
   cursor: default;
 }
 
+.axis-unavailable {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.8125rem;
+  color: var(--text-500);
+  text-align: center;
+  padding: 0.5rem 1rem;
+  background: var(--bg-gray-50);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.axis-partial {
+  top: auto;
+  bottom: 0.5rem;
+  transform: translateX(-50%);
+  font-size: 0.6875rem;
+  background: rgba(255, 255, 255, 0.9);
+}
+
 /* ── Persona Cluster Block ── */
 
 .cluster-block {
@@ -1226,6 +1253,106 @@ header p {
 
 .compare-result-col .article-info-card {
   margin-bottom: 1rem;
+}
+
+/* ── Health Indicator ── */
+
+.health-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.health-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--text-400);
+  transition: background 0.3s ease;
+}
+
+.health-dot.ok {
+  background: var(--green-500);
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.4);
+}
+
+.health-dot.error {
+  background: var(--rose-500);
+  box-shadow: 0 0 4px rgba(244, 63, 94, 0.4);
+}
+
+.health-label {
+  font-size: 0.6875rem;
+  color: var(--text-500);
+  white-space: nowrap;
+}
+
+/* ── Partial Results Notice ── */
+
+.partial-notice {
+  display: none;
+  padding: 0.65rem 1rem;
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  color: #92400e;
+  margin-bottom: 1rem;
+}
+
+.partial-notice.active {
+  display: block;
+}
+
+/* ── Persona Card Loading State ── */
+
+.persona-card.loading {
+  min-height: 8rem;
+  opacity: 1;
+  animation: none;
+}
+
+.persona-card.loading .persona-card-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem 0;
+}
+
+.persona-card-spinner {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--bg-gray-100);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.persona-card-loading-label {
+  font-size: 0.75rem;
+  color: var(--text-500);
+}
+
+.persona-card.failed {
+  opacity: 1;
+  animation: none;
+  border-color: var(--red-200);
+  background: var(--red-50);
+}
+
+.persona-card-error {
+  font-size: 0.8125rem;
+  color: var(--red-800);
+  text-align: center;
+  padding: 1rem 0;
 }
 
 /* ── Footer ── */

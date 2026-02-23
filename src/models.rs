@@ -1,9 +1,10 @@
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
+use lru::LruCache;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 // =============================================================================
 // Core persona types (v3 — 8 political personas)
@@ -117,6 +118,11 @@ pub struct AnalysisResult {
     pub source_url: Option<String>,
     pub personas: Vec<PersonaOutput>,
     pub debiaser: DebiasedSummary,
+    /// Warnings from partial failures (e.g., "2/8 personas failed").
+    /// Empty in the happy path; present when some personas failed but
+    /// enough succeeded to produce a useful result.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 // =============================================================================
@@ -163,20 +169,39 @@ pub struct ErrorResponse {
 }
 
 // =============================================================================
-// Shared state
+// Shared state (bounded LRU caches)
 // =============================================================================
 
-/// Shared article cache: URL -> ArticleContent.
-pub type ArticleCache = Arc<RwLock<HashMap<String, ArticleContent>>>;
+/// Default max entries for article cache.
+pub const DEFAULT_CACHE_SIZE: usize = 100;
+/// Default max entries for analysis history store.
+pub const DEFAULT_STORE_SIZE: usize = 500;
 
-/// Shared analysis history store: short ID -> StoredAnalysis.
-pub type AnalysisStore = Arc<RwLock<HashMap<String, StoredAnalysis>>>;
+/// Shared article cache: URL -> ArticleContent (LRU-bounded).
+pub type ArticleCache = Arc<RwLock<LruCache<String, ArticleContent>>>;
+
+/// Shared analysis history store: short ID -> StoredAnalysis (LRU-bounded).
+pub type AnalysisStore = Arc<RwLock<LruCache<String, StoredAnalysis>>>;
 
 /// Combined application state shared across handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub cache: ArticleCache,
     pub store: AnalysisStore,
+}
+
+impl AppState {
+    /// Create a new AppState with configurable cache sizes.
+    pub fn new(cache_size: usize, store_size: usize) -> Self {
+        Self {
+            cache: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap()),
+            ))),
+            store: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(store_size).unwrap_or(NonZeroUsize::new(DEFAULT_STORE_SIZE).unwrap()),
+            ))),
+        }
+    }
 }
 
 // =============================================================================
@@ -386,12 +411,15 @@ mod tests {
                 spectrum_score: 0.0,
                 spectrum_explain: "Neutral.".to_string(),
             },
+            warnings: vec![],
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("title"));
         assert!(json.contains("personas"));
         assert!(json.contains("debiaser"));
         assert!(json.contains("spectrum_score"));
+        // warnings should be omitted when empty (skip_serializing_if)
+        assert!(!json.contains("warnings"));
     }
 
     #[test]
@@ -408,10 +436,52 @@ mod tests {
                 spectrum_score: 0.0,
                 spectrum_explain: "N/A".to_string(),
             },
+            warnings: vec![],
         };
         let json = serde_json::to_string(&result).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert!(parsed["source_url"].is_null());
+    }
+
+    #[test]
+    fn analysis_result_with_warnings_serializes() {
+        let result = AnalysisResult {
+            title: "Partial".to_string(),
+            source_url: None,
+            personas: vec![],
+            debiaser: DebiasedSummary {
+                consensus_points: vec![],
+                disagreements: vec![],
+                likely_bias_drivers: vec![],
+                truth_seeking_summary: "Partial.".to_string(),
+                spectrum_score: 0.0,
+                spectrum_explain: "N/A".to_string(),
+            },
+            warnings: vec!["2/8 personas failed: Progressive Activist, Centrist Technocrat".to_string()],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("warnings"));
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["warnings"].as_array().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn analysis_result_deserializes_without_warnings_field() {
+        let json = r#"{
+            "title": "Old format",
+            "source_url": null,
+            "personas": [],
+            "debiaser": {
+                "consensus_points": [],
+                "disagreements": [],
+                "likely_bias_drivers": [],
+                "truth_seeking_summary": "Test.",
+                "spectrum_score": 0.0,
+                "spectrum_explain": "Test."
+            }
+        }"#;
+        let result: AnalysisResult = serde_json::from_str(json).unwrap();
+        assert!(result.warnings.is_empty());
     }
 
     #[test]
@@ -489,7 +559,9 @@ mod tests {
 
     #[test]
     fn article_cache_type_is_arc_rwlock() {
-        let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
+            LruCache::new(NonZeroUsize::new(10).unwrap()),
+        ));
         assert!(std::sync::Arc::strong_count(&cache) == 1);
     }
 

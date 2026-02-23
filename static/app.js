@@ -183,6 +183,14 @@ var ERROR_HINTS = {
 
 function classifyError(err) {
   if (err._parsed) return err._parsed;
+  // Detect network-level failures (server unreachable)
+  if (err instanceof TypeError && err.message === 'Failed to fetch') {
+    return {
+      title: 'Server unreachable',
+      body: 'Could not connect to the Debiaser server.',
+      hint: 'Check that the server is running and try again.'
+    };
+  }
   return { title: 'Something went wrong', body: err.message || String(err), hint: null };
 }
 
@@ -221,28 +229,23 @@ async function parseApiError(res) {
 
 // ── Skeleton Loading ──
 
-function buildSkeletonCard() {
+function buildSkeletonCard(personaName) {
   var card = document.createElement('div');
-  card.className = 'skeleton-card';
+  card.className = 'persona-card loading';
   card.innerHTML =
-    '<div class="skeleton-line skeleton-accent"></div>' +
-    '<div class="skeleton-header">' +
-      '<div class="skeleton-line skeleton-icon"></div>' +
-      '<div class="skeleton-line skeleton-title"></div>' +
-    '</div>' +
-    '<div class="skeleton-line skeleton-text"></div>' +
-    '<div class="skeleton-line skeleton-text"></div>' +
-    '<div class="skeleton-line skeleton-text"></div>' +
-    '<div class="skeleton-line skeleton-bullet"></div>' +
-    '<div class="skeleton-line skeleton-bullet"></div>' +
-    '<div class="skeleton-line skeleton-bullet"></div>' +
-    '<div class="skeleton-line skeleton-bar"></div>';
+    '<div class="persona-card-inner">' +
+      '<div class="persona-card-spinner"></div>' +
+      '<span class="persona-card-loading-label">' + escapeHtml(personaName || 'Loading...') + '</span>' +
+    '</div>';
   return card;
 }
 
 function showSkeletons() {
   skeletonGrid.innerHTML = '';
-  for (var i = 0; i < 4; i++) skeletonGrid.appendChild(buildSkeletonCard());
+  for (var i = 0; i < 8; i++) {
+    var name = PERSONA_NAMES[i] || 'Persona ' + (i + 1);
+    skeletonGrid.appendChild(buildSkeletonCard(name));
+  }
   show(skeletonGrid);
 }
 
@@ -252,31 +255,48 @@ function hideSkeletons() {
 
 // ── Progress Loader ──
 
+var PERSONA_NAMES = [
+  'Progressive Activist',
+  'Liberal Social Democrat',
+  'Centrist Technocrat',
+  'Libertarian, Civil Liberties',
+  'Conservative, Fiscal',
+  'National Security Hawk',
+  'Environmentalist Green',
+  'Populist, Anti-elite'
+];
+
 var progressInterval = null;
 var progressValue = 0;
+var progressPersonaIdx = 0;
 
 function showProgress(message) {
   progressValue = 0;
+  progressPersonaIdx = 0;
   progressBarFill.style.width = '0%';
   progressText.textContent = message || 'Analysing article...';
   show(progressLoader);
 
-  // Simulate progress
+  // Simulate progress with persona names cycling
   clearInterval(progressInterval);
   progressInterval = setInterval(function() {
     if (progressValue < 85) {
-      progressValue += Math.random() * 8 + 2;
+      progressValue += Math.random() * 6 + 1.5;
       progressValue = Math.min(progressValue, 85);
       progressBarFill.style.width = progressValue + '%';
     }
-    if (progressValue >= 20 && progressValue < 50) {
-      progressText.textContent = 'Running persona analyses...';
-    } else if (progressValue >= 50 && progressValue < 75) {
-      progressText.textContent = 'Synthesising perspectives...';
-    } else if (progressValue >= 75) {
+    if (progressValue < 10) {
+      progressText.textContent = 'Scraping article content...';
+    } else if (progressValue < 75) {
+      var name = PERSONA_NAMES[progressPersonaIdx % PERSONA_NAMES.length];
+      progressText.textContent = 'Analysing as ' + name + '... (' + (progressPersonaIdx + 1) + '/8)';
+      progressPersonaIdx++;
+    } else if (progressValue < 82) {
+      progressText.textContent = 'Synthesising debiased summary...';
+    } else {
       progressText.textContent = 'Almost done...';
     }
-  }, 500);
+  }, 800);
 }
 
 function hideProgress() {
@@ -351,9 +371,20 @@ function renderDisagreementMeter(personas) {
 
 function renderAxisGrid(personas) {
   var grid = document.getElementById('axis-grid');
-  // Remove old dots
-  grid.querySelectorAll('.axis-dot').forEach(function(d) { d.remove(); });
+  // Remove old dots + unavailable message
+  grid.querySelectorAll('.axis-dot, .axis-unavailable').forEach(function(d) { d.remove(); });
   grid.querySelectorAll('.gridline-h, .gridline-v, .axis-center-h, .axis-center-v').forEach(function(d) { d.remove(); });
+
+  var withAxes = personas.filter(function(p) { return p.axes; });
+
+  // No axes data at all — show unavailable message
+  if (withAxes.length === 0) {
+    var msg = document.createElement('div');
+    msg.className = 'axis-unavailable';
+    msg.textContent = 'Axis data unavailable for this analysis';
+    grid.appendChild(msg);
+    return;
+  }
 
   // Gridlines
   [0, 25, 50, 75, 100].forEach(function(p) {
@@ -379,8 +410,7 @@ function renderAxisGrid(personas) {
   // Plot dots
   var toPct = function(v) { return ((clamp(v, -3, 3) + 3) / 6) * 100; };
 
-  personas.forEach(function(p) {
-    if (!p.axes) return;
+  withAxes.forEach(function(p) {
     var econ = p.axes.economic;
     var soc = p.axes.social;
     var bg = colourForAxes(econ, soc);
@@ -393,6 +423,14 @@ function renderAxisGrid(personas) {
     dot.title = p.title + ': econ ' + econ.toFixed(1) + ', social ' + soc.toFixed(1);
     grid.appendChild(dot);
   });
+
+  // Partial axes notice — some personas missing data
+  if (withAxes.length < personas.length) {
+    var notice = document.createElement('div');
+    notice.className = 'axis-unavailable axis-partial';
+    notice.textContent = withAxes.length + ' of ' + personas.length + ' personas provided axis data';
+    grid.appendChild(notice);
+  }
 
   // Legend dots
   document.getElementById('legend-dot-lo').style.background = colourForAxes(-3, -3);
@@ -482,15 +520,27 @@ function renderResults(rawData, sourceUrl) {
   // Disagreement meter + clustering
   var clusterInfo = renderDisagreementMeter(data.personas);
 
-  // 2D toggle
-  var has2D = data.personas.some(function(p) { return p.axes; });
+  // 2D toggle — always render (shows unavailable message if no axes data)
   var show2dCheckbox = document.getElementById('show-2d');
   var axisSection = document.getElementById('axis-grid-section');
-  if (has2D) {
-    renderAxisGrid(data.personas);
-    if (show2dCheckbox.checked) show(axisSection);
+  renderAxisGrid(data.personas);
+  if (show2dCheckbox.checked) show(axisSection);
+
+  // Partial results notice — show API warnings or persona count note
+  var partialNotice = document.getElementById('partial-notice');
+  var warnings = rawData.warnings || [];
+  var totalPersonas = data.personas.length;
+  if (warnings.length > 0) {
+    partialNotice.textContent = warnings.join(' \u2022 ');
+    show(partialNotice);
+  } else if (totalPersonas > 0 && totalPersonas < 8) {
+    var failed = 8 - totalPersonas;
+    partialNotice.textContent = 'Partial results: ' + totalPersonas + ' of 8 personas responded. ' +
+      failed + ' persona' + (failed !== 1 ? 's' : '') + ' failed to analyse this article. ' +
+      'Results below are based on available perspectives only.';
+    show(partialNotice);
   } else {
-    hide(axisSection);
+    hide(partialNotice);
   }
 
   // Persona clusters
@@ -572,7 +622,7 @@ document.querySelectorAll('.input-tab').forEach(function(tab) {
 
 document.getElementById('show-2d').addEventListener('change', function() {
   var section = document.getElementById('axis-grid-section');
-  if (this.checked && currentData && currentData.personas.some(function(p) { return p.axes; })) {
+  if (this.checked && currentData) {
     show(section);
   } else {
     hide(section);
@@ -989,6 +1039,38 @@ function handleHashRoute() {
 
 window.addEventListener('hashchange', handleHashRoute);
 handleHashRoute();
+
+// ── Health Check ──
+
+var healthDot = document.getElementById('health-dot');
+var healthLabel = document.getElementById('health-label');
+var healthOk = false;
+
+function checkHealth() {
+  fetch('/health').then(function(res) {
+    if (res.ok) {
+      healthDot.className = 'health-dot ok';
+      healthLabel.textContent = 'Connected';
+      healthDot.parentElement.title = 'Server is reachable';
+      healthOk = true;
+    } else {
+      setHealthError();
+    }
+  }).catch(function() {
+    setHealthError();
+  });
+}
+
+function setHealthError() {
+  healthDot.className = 'health-dot error';
+  healthLabel.textContent = 'Disconnected';
+  healthDot.parentElement.title = 'Cannot reach server — is it running?';
+  healthOk = false;
+}
+
+// Poll health every 30s, check immediately on load
+checkHealth();
+setInterval(checkHealth, 30000);
 
 // ── Init ──
 
