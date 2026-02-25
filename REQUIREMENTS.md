@@ -1,7 +1,7 @@
 # PoliticalDebAIser — Requirements Document
 
-**Version:** 3.0
-**Last Updated:** 2026-02-18
+**Version:** 3.1
+**Last Updated:** 2026-02-25
 **Project Lead:** Tiny Steve the Procrastinator
 **Client:** Friendji
 
@@ -118,6 +118,23 @@ The system analyzes content through 8 political persona lenses:
 - **T-052:** Export (JSON + text) and Share Link
 - **T-053:** URL and text input tabs
 
+### 3.6 Article Summarization
+- **T-060:** Articles >4000 chars summarized before persona analysis (configurable via SUMMARY_THRESHOLD env var)
+- **T-061:** Summarization uses Ollama with detailed prompt preserving key facts, claims, quotes, and framing
+- **T-062:** Summarization threshold configurable via SUMMARY_THRESHOLD env var (default: 4000)
+
+### 3.7 Tone & Framing Analysis
+- **T-070:** Analyzes rhetorical devices (list of strings)
+- **T-071:** Detects emotional tone (string)
+- **T-072:** Identifies framing strategy (string)
+- **T-073:** Objectivity score (0.0 to 1.0)
+- **T-074:** All analysis uses BEGIN/END ARTICLE delimiters for prompt injection mitigation
+
+### 3.8 Source Credibility
+- **T-080:** LLM-based source identification (publication name, known bias, ownership type)
+- **T-081:** Scraper-based fallback with 35-publication known database
+- **T-082:** Known bias labels from established media bias assessments
+
 ---
 
 ## 4. Data Structures
@@ -149,13 +166,35 @@ DebiasedSummary {
 }
 ```
 
-### 4.3 AnalysisResult (replaces AnalysisResponse)
+### 4.3 ToneAnalysis
+```
+ToneAnalysis {
+  rhetorical_devices: Vec<String>,
+  emotional_tone: String,
+  framing_strategy: String,
+  objectivity_score: f64,   // 0.0 to 1.0
+}
+```
+
+### 4.4 SourceMeta
+```
+SourceMeta {
+  publication: String,
+  known_bias: Option<String>,
+  ownership_type: Option<String>,
+}
+```
+
+### 4.5 AnalysisResult (replaces AnalysisResponse)
 ```
 AnalysisResult {
   title: String,
   source_url: Option<String>,
   personas: Vec<PersonaOutput>,
   debiaser: DebiasedSummary,
+  tone_analysis: Option<ToneAnalysis>,
+  source_meta: Option<SourceMeta>,
+  warnings: Vec<String>,
 }
 ```
 
@@ -193,3 +232,4 @@ OLLAMA_MODEL=llama3.2               # Model to use for analysis
 | 2026-02-17 | 1.1 | Switched from Anthropic API to Ollama local model inference |
 | 2026-02-17 | 2.0 | Parallel analysis, caching, Docker, frontend polish, Stage 1 features |
 | 2026-02-18 | 3.0 | Major redesign: 8 personas, stance scoring, fact-checking, 2D axes, debiaser synthesis, per Friendji prototype |
+| 2026-02-25 | 3.1 | Stage 3: Article summarization, tone/framing analysis, source credibility, 35-pub database |
