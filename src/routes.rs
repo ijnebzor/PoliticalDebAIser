@@ -5,7 +5,7 @@
 // ## Analysis Pipeline
 //
 // Both /analyze (URL) and /analyze-text (pasted text) return an AnalysisResult:
-//   { title, source_url?, personas: [PersonaOutput], debiaser: DebiasedSummary }
+//   { title, source_url?, personas, debiaser, tone_analysis?, source_meta? }
 //
 // The debiaser synthesis is built into the analysis pipeline — no separate
 // /synthesize endpoint is needed.
@@ -41,11 +41,11 @@ use axum::response::{Html, IntoResponse, Json, Response};
 
 use crate::archetypes;
 use crate::models::{
-    AnalysisRequest, AnalysisResult, AppState, DebiasedSummary, ErrorResponse, HistoryListItem,
-    PersonaOutput, StoredAnalysis, StoreHistoryRequest, StoreHistoryResponse,
-    TextAnalysisRequest, generate_short_id,
+    AnalysisRequest, AnalysisResult, AppState, ErrorResponse, HistoryListItem, SourceMeta,
+    StoreHistoryRequest, StoreHistoryResponse, StoredAnalysis, TextAnalysisRequest,
+    generate_short_id,
 };
-use crate::scraper::{extract_from_text, scrape_article, ScrapeError};
+use crate::scraper::{ScrapeError, extract_from_text, extract_source_meta, scrape_article};
 
 /// Structured API error that renders as JSON with an appropriate status code.
 pub struct ApiError {
@@ -126,32 +126,11 @@ fn analysis_err(e: anyhow::Error) -> ApiError {
         ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             error: "Analysis failed".to_string(),
-            details: Some("An internal error occurred during analysis. Check server logs for details.".to_string()),
+            details: Some(
+                "An internal error occurred during analysis. Check server logs for details."
+                    .to_string(),
+            ),
         }
-    }
-}
-
-/// Build a fallback DebiasedSummary when LLM synthesis fails.
-/// Uses confidence-weighted mean of persona stance scores.
-fn fallback_debiaser(personas: &[PersonaOutput]) -> DebiasedSummary {
-    let (weighted_sum, weight_sum) =
-        personas
-            .iter()
-            .fold((0.0_f64, 0.0_f64), |(ws, wt), p| {
-                (ws + p.stance_score * p.confidence, wt + p.confidence)
-            });
-    let spectrum_score = if weight_sum > 0.0 {
-        (weighted_sum / weight_sum * 100.0).round() / 100.0
-    } else {
-        0.0
-    };
-    DebiasedSummary {
-        consensus_points: vec![],
-        disagreements: vec![],
-        likely_bias_drivers: vec![],
-        truth_seeking_summary: "Debiased summary could not be generated.".to_string(),
-        spectrum_score,
-        spectrum_explain: "Fallback: simple weighted mean of persona stance scores.".to_string(),
     }
 }
 
@@ -170,33 +149,26 @@ pub async fn analyze(
     State(state): State<AppState>,
     Json(payload): Json<AnalysisRequest>,
 ) -> Result<Json<AnalysisResult>, ApiError> {
-    let article = scrape_article(&payload.url, &state.cache).await.map_err(scrape_err)?;
-
-    let result = archetypes::analyze_all_personas(&article.body_text)
+    let article = scrape_article(&payload.url, &state.cache)
         .await
-        .map_err(analysis_err)?;
+        .map_err(scrape_err)?;
 
-    let mut warnings: Vec<String> = result
-        .failed
-        .iter()
-        .map(|name| format!("{name} analysis failed"))
-        .collect();
+    let mut result =
+        archetypes::analyze_full(&article.body_text, &article.title, Some(&payload.url))
+            .await
+            .map_err(analysis_err)?;
 
-    let debiaser = archetypes::synthesize_debiased(&result.outputs)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("Debiased synthesis failed, using fallback: {e}");
-            warnings.push("Debiased synthesis failed — using fallback".to_string());
-            fallback_debiaser(&result.outputs)
+    // If LLM-based source credibility failed, fall back to domain-based metadata
+    if result.source_meta.is_none() {
+        let scraped = extract_source_meta(&payload.url);
+        result.source_meta = Some(SourceMeta {
+            publication: scraped.publication,
+            known_bias: scraped.known_bias,
+            ownership_type: scraped.media_type,
         });
+    }
 
-    Ok(Json(AnalysisResult {
-        title: article.title,
-        source_url: Some(payload.url),
-        personas: result.outputs,
-        debiaser,
-        warnings,
-    }))
+    Ok(Json(result))
 }
 
 /// POST /analyze-text — accepts raw article text (no URL scraping) and runs
@@ -224,31 +196,11 @@ pub async fn analyze_text(
 
     let article = extract_from_text(&payload.text, payload.title.as_deref());
 
-    let result = archetypes::analyze_all_personas(&article.body_text)
+    let result = archetypes::analyze_full(&article.body_text, &article.title, None)
         .await
         .map_err(analysis_err)?;
 
-    let mut warnings: Vec<String> = result
-        .failed
-        .iter()
-        .map(|name| format!("{name} analysis failed"))
-        .collect();
-
-    let debiaser = archetypes::synthesize_debiased(&result.outputs)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!("Debiased synthesis failed, using fallback: {e}");
-            warnings.push("Debiased synthesis failed — using fallback".to_string());
-            fallback_debiaser(&result.outputs)
-        });
-
-    Ok(Json(AnalysisResult {
-        title: article.title,
-        source_url: None,
-        personas: result.outputs,
-        debiaser,
-        warnings,
-    }))
+    Ok(Json(result))
 }
 
 /// POST /history — store a completed analysis, return { id, share_url }.
@@ -281,9 +233,7 @@ pub async fn store_analysis(
 }
 
 /// GET /history — list all stored analyses (summary only).
-pub async fn list_history(
-    State(state): State<AppState>,
-) -> Json<Vec<HistoryListItem>> {
+pub async fn list_history(State(state): State<AppState>) -> Json<Vec<HistoryListItem>> {
     let store = state.store.read().await;
     let mut items: Vec<HistoryListItem> = store
         .iter()

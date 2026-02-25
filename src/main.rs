@@ -1,14 +1,14 @@
 use std::net::SocketAddr;
 
-use axum::{routing, Router};
-use political_debaiser::{models, routes};
 use axum::http::{HeaderName, HeaderValue, Method};
+use axum::{Router, routing};
+use political_debaiser::{models, routes};
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
-use tower_governor::governor::GovernorConfigBuilder;
-use tower_governor::GovernorLayer;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -97,7 +97,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("PoliticalDebAIser listening on {addr}");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

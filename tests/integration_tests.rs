@@ -1,82 +1,95 @@
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing;
-use axum::Router;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
+use political_debaiser::models::{AnalysisResult, DebiasedSummary, SourceMeta, ToneAnalysis};
+
 /// Build the app router with stubs for LLM-dependent endpoints.
 fn app() -> Router {
     Router::new()
-        .route("/", routing::get(|| async { axum::response::Html(include_str!("../static/index.html")) }))
-        .route("/health", routing::get(|| async {
-            axum::Json(serde_json::json!({"status": "ok"}))
-        }))
+        .route(
+            "/",
+            routing::get(|| async { axum::response::Html(include_str!("../static/index.html")) }),
+        )
+        .route(
+            "/health",
+            routing::get(|| async { axum::Json(serde_json::json!({"status": "ok"})) }),
+        )
         .route(
             "/analyze",
-            routing::post(|axum::Json(payload): axum::Json<serde_json::Value>| async move {
-                if payload.get("url").and_then(|v| v.as_str()).is_some() {
-                    (
-                        StatusCode::OK,
-                        axum::Json(serde_json::json!({
-                            "title": "Test Article",
-                            "source_url": "https://example.com/article",
-                            "personas": [],
-                            "debiaser": {
-                                "consensus_points": [],
-                                "disagreements": [],
-                                "likely_bias_drivers": [],
-                                "truth_seeking_summary": "Stub summary.",
-                                "spectrum_score": 0.0,
-                                "spectrum_explain": "Stub."
-                            }
-                        })),
-                    )
-                } else {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        axum::Json(serde_json::json!({
-                            "error": "Invalid URL",
-                            "details": "URL must start with http:// or https://"
-                        })),
-                    )
-                }
-            }),
+            routing::post(
+                |axum::Json(payload): axum::Json<serde_json::Value>| async move {
+                    if payload.get("url").and_then(|v| v.as_str()).is_some() {
+                        (
+                            StatusCode::OK,
+                            axum::Json(serde_json::json!({
+                                "title": "Test Article",
+                                "source_url": "https://example.com/article",
+                                "personas": [],
+                                "debiaser": {
+                                    "consensus_points": [],
+                                    "disagreements": [],
+                                    "likely_bias_drivers": [],
+                                    "truth_seeking_summary": "Stub summary.",
+                                    "spectrum_score": 0.0,
+                                    "spectrum_explain": "Stub."
+                                }
+                            })),
+                        )
+                    } else {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            axum::Json(serde_json::json!({
+                                "error": "Invalid URL",
+                                "details": "URL must start with http:// or https://"
+                            })),
+                        )
+                    }
+                },
+            ),
         )
         .route(
             "/analyze-text",
-            routing::post(|axum::Json(payload): axum::Json<serde_json::Value>| async move {
-                let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                if text.trim().is_empty() {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        axum::Json(serde_json::json!({
-                            "error": "Empty text",
-                            "details": "The text field must not be empty"
-                        })),
-                    )
-                } else {
-                    let title = payload.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
-                    (
-                        StatusCode::OK,
-                        axum::Json(serde_json::json!({
-                            "title": title,
-                            "source_url": null,
-                            "personas": [],
-                            "debiaser": {
-                                "consensus_points": [],
-                                "disagreements": [],
-                                "likely_bias_drivers": [],
-                                "truth_seeking_summary": "Stub.",
-                                "spectrum_score": 0.0,
-                                "spectrum_explain": "Stub."
-                            }
-                        })),
-                    )
-                }
-            }),
+            routing::post(
+                |axum::Json(payload): axum::Json<serde_json::Value>| async move {
+                    let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    if text.trim().is_empty() {
+                        (
+                            StatusCode::BAD_REQUEST,
+                            axum::Json(serde_json::json!({
+                                "error": "Empty text",
+                                "details": "The text field must not be empty"
+                            })),
+                        )
+                    } else {
+                        let title = payload
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("Untitled");
+                        (
+                            StatusCode::OK,
+                            axum::Json(serde_json::json!({
+                                "title": title,
+                                "source_url": null,
+                                "personas": [],
+                                "debiaser": {
+                                    "consensus_points": [],
+                                    "disagreements": [],
+                                    "likely_bias_drivers": [],
+                                    "truth_seeking_summary": "Stub.",
+                                    "spectrum_score": 0.0,
+                                    "spectrum_explain": "Stub."
+                                }
+                            })),
+                        )
+                    }
+                },
+            ),
         )
         .nest_service("/static", ServeDir::new("static"))
         .layer(CorsLayer::permissive())
@@ -94,8 +107,14 @@ fn app_with_state() -> Router {
 
     Router::new()
         .route("/health", routing::get(routes::health))
-        .route("/history", routing::get(routes::list_history).post(routes::store_analysis))
-        .route("/history/{id}", routing::get(routes::get_analysis).delete(routes::delete_history))
+        .route(
+            "/history",
+            routing::get(routes::list_history).post(routes::store_analysis),
+        )
+        .route(
+            "/history/{id}",
+            routing::get(routes::get_analysis).delete(routes::delete_history),
+        )
         .with_state(state)
         .layer(CorsLayer::permissive())
 }
@@ -216,7 +235,12 @@ async fn cors_headers_are_present() {
 #[tokio::test]
 async fn get_health_returns_ok_with_status() {
     let response = app()
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -229,7 +253,12 @@ async fn get_health_returns_ok_with_status() {
 #[tokio::test]
 async fn get_health_returns_json_content_type() {
     let response = app()
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
@@ -289,8 +318,14 @@ async fn post_analyze_without_url_returns_error_json() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.get("error").is_some(), "Error response missing 'error' field");
-    assert!(json.get("details").is_some(), "Error response missing 'details' field");
+    assert!(
+        json.get("error").is_some(),
+        "Error response missing 'error' field"
+    );
+    assert!(
+        json.get("details").is_some(),
+        "Error response missing 'details' field"
+    );
 }
 
 #[tokio::test]
@@ -358,7 +393,9 @@ async fn post_analyze_text_with_valid_text_returns_ok() {
                 .method("POST")
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"text": "This is a political article about recent policy changes."}"#))
+                .body(Body::from(
+                    r#"{"text": "This is a political article about recent policy changes."}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -417,7 +454,9 @@ async fn post_analyze_text_with_custom_title() {
                 .method("POST")
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
-                .body(Body::from(r#"{"text": "Some article content.", "title": "Custom Title"}"#))
+                .body(Body::from(
+                    r#"{"text": "Some article content.", "title": "Custom Title"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -491,7 +530,10 @@ async fn post_history_stores_analysis_returns_201() {
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json.get("id").is_some(), "Response must contain 'id'");
-    assert!(json.get("share_url").is_some(), "Response must contain 'share_url'");
+    assert!(
+        json.get("share_url").is_some(),
+        "Response must contain 'share_url'"
+    );
     let id = json["id"].as_str().unwrap();
     assert_eq!(id.len(), 8, "Short ID should be 8 characters");
     assert!(json["share_url"].as_str().unwrap().contains(id));
@@ -688,4 +730,311 @@ async fn post_history_with_invalid_json_returns_error() {
         "Expected 400 or 422 for invalid JSON, got {}",
         response.status()
     );
+}
+
+// =============================================================================
+// Stage 3 — ToneAnalysis Serialization Tests
+// Stubs: #[ignore] until Sir Reginald adds ToneAnalysis to models.rs
+// =============================================================================
+
+#[test]
+fn tone_analysis_serialization_roundtrip() {
+    let tone = ToneAnalysis {
+        rhetorical_devices: vec![
+            "appeal to fear".to_string(),
+            "loaded language".to_string(),
+            "false equivalence".to_string(),
+        ],
+        emotional_tone: "alarmist".to_string(),
+        framing_strategy: "conflict frame".to_string(),
+        objectivity_score: 0.35,
+    };
+    let json = serde_json::to_string(&tone).unwrap();
+    let roundtripped: ToneAnalysis = serde_json::from_str(&json).unwrap();
+    assert_eq!(roundtripped.rhetorical_devices.len(), 3);
+    assert_eq!(roundtripped.rhetorical_devices[0], "appeal to fear");
+    assert_eq!(roundtripped.emotional_tone, "alarmist");
+    assert_eq!(roundtripped.framing_strategy, "conflict frame");
+    assert!((roundtripped.objectivity_score - 0.35).abs() < f64::EPSILON);
+}
+
+#[test]
+fn tone_analysis_all_fields_populated() {
+    let tone = ToneAnalysis {
+        rhetorical_devices: vec!["straw man".to_string(), "appeal to authority".to_string()],
+        emotional_tone: "measured".to_string(),
+        framing_strategy: "human interest".to_string(),
+        objectivity_score: 0.78,
+    };
+    let json = serde_json::to_string(&tone).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    // All fields present in serialized JSON
+    assert!(parsed.get("rhetorical_devices").is_some());
+    assert!(parsed.get("emotional_tone").is_some());
+    assert!(parsed.get("framing_strategy").is_some());
+    assert!(parsed.get("objectivity_score").is_some());
+    assert_eq!(parsed["rhetorical_devices"].as_array().unwrap().len(), 2);
+    assert_eq!(parsed["emotional_tone"], "measured");
+    assert_eq!(parsed["framing_strategy"], "human interest");
+    assert!((parsed["objectivity_score"].as_f64().unwrap() - 0.78).abs() < f64::EPSILON);
+}
+
+#[test]
+fn analysis_result_with_tone_analysis_backward_compat() {
+    // Stage 2 JSON — no tone_analysis or source_meta fields
+    let stage2_json = r#"{
+        "title": "Stage 2 Article",
+        "source_url": "https://example.com/old",
+        "personas": [],
+        "debiaser": {
+            "consensus_points": ["All agree"],
+            "disagreements": [],
+            "likely_bias_drivers": [],
+            "truth_seeking_summary": "Old format summary.",
+            "spectrum_score": -0.5,
+            "spectrum_explain": "Slightly left."
+        }
+    }"#;
+    let result: AnalysisResult = serde_json::from_str(stage2_json).unwrap();
+    // Stage 3 optional fields default to None
+    assert!(result.tone_analysis.is_none());
+    assert!(result.source_meta.is_none());
+    assert!(result.warnings.is_empty());
+    // Core fields intact
+    assert_eq!(result.title, "Stage 2 Article");
+    assert_eq!(
+        result.source_url,
+        Some("https://example.com/old".to_string())
+    );
+    assert!((result.debiaser.spectrum_score - (-0.5)).abs() < f64::EPSILON);
+}
+
+// =============================================================================
+// Stage 3 — SourceMeta Serialization Tests
+// Stubs: #[ignore] until Sir Reginald adds SourceMeta to models.rs
+// =============================================================================
+
+#[test]
+fn source_meta_serialization_roundtrip() {
+    let meta = SourceMeta {
+        publication: "Reuters".to_string(),
+        known_bias: Some("center".to_string()),
+        ownership_type: Some("wire_service".to_string()),
+    };
+    let json = serde_json::to_string(&meta).unwrap();
+    let roundtripped: SourceMeta = serde_json::from_str(&json).unwrap();
+    assert_eq!(roundtripped.publication, "Reuters");
+    assert_eq!(roundtripped.known_bias, Some("center".to_string()));
+    assert_eq!(
+        roundtripped.ownership_type,
+        Some("wire_service".to_string())
+    );
+}
+
+#[test]
+fn source_meta_with_known_publication() {
+    let meta = SourceMeta {
+        publication: "Fox News".to_string(),
+        known_bias: Some("right-leaning".to_string()),
+        ownership_type: Some("corporate".to_string()),
+    };
+    let json = serde_json::to_string(&meta).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["publication"], "Fox News");
+    assert_eq!(parsed["known_bias"], "right-leaning");
+    assert_eq!(parsed["ownership_type"], "corporate");
+}
+
+#[test]
+fn source_meta_with_unknown_publication() {
+    let meta = SourceMeta {
+        publication: "Random Blog".to_string(),
+        known_bias: None,
+        ownership_type: None,
+    };
+    let json = serde_json::to_string(&meta).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed["publication"], "Random Blog");
+    assert!(parsed["known_bias"].is_null());
+    assert!(parsed["ownership_type"].is_null());
+    // Verify roundtrip preserves None fields
+    let roundtripped: SourceMeta = serde_json::from_str(&json).unwrap();
+    assert!(roundtripped.known_bias.is_none());
+    assert!(roundtripped.ownership_type.is_none());
+}
+
+#[test]
+fn analysis_result_with_source_meta_backward_compat() {
+    // Stage 2 JSON with warnings field but no source_meta or tone_analysis
+    let stage2_json = r#"{
+        "title": "Backward Compat Test",
+        "source_url": null,
+        "personas": [],
+        "debiaser": {
+            "consensus_points": [],
+            "disagreements": [],
+            "likely_bias_drivers": [],
+            "truth_seeking_summary": "Test.",
+            "spectrum_score": 0.0,
+            "spectrum_explain": "Test."
+        },
+        "warnings": ["2/8 personas failed"]
+    }"#;
+    let result: AnalysisResult = serde_json::from_str(stage2_json).unwrap();
+    assert!(result.source_meta.is_none());
+    assert!(result.tone_analysis.is_none());
+    assert_eq!(result.warnings.len(), 1);
+    assert_eq!(result.title, "Backward Compat Test");
+}
+
+// =============================================================================
+// Stage 3 — Integration: Stub /analyze and /analyze-text with new fields
+// Stubs: #[ignore] until routes deliver new API shape
+// =============================================================================
+
+#[tokio::test]
+async fn analyze_response_includes_tone_and_source_meta() {
+    // Verify the full Stage 3 AnalysisResult shape serializes correctly,
+    // simulating what /analyze-text would return with Stage 3 features.
+    let full_result = AnalysisResult {
+        title: "Stage 3 Response Shape".to_string(),
+        source_url: Some("https://example.com".to_string()),
+        personas: vec![],
+        debiaser: DebiasedSummary {
+            consensus_points: vec!["Agreement".to_string()],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "Comprehensive analysis.".to_string(),
+            spectrum_score: 0.1,
+            spectrum_explain: "Slightly right.".to_string(),
+        },
+        tone_analysis: Some(ToneAnalysis {
+            rhetorical_devices: vec!["appeal to fear".to_string()],
+            emotional_tone: "urgent".to_string(),
+            framing_strategy: "conflict frame".to_string(),
+            objectivity_score: 0.45,
+        }),
+        source_meta: Some(SourceMeta {
+            publication: "The Guardian".to_string(),
+            known_bias: Some("left-leaning".to_string()),
+            ownership_type: Some("corporate".to_string()),
+        }),
+        warnings: vec![],
+    };
+
+    // Serialize as the API would
+    let json = serde_json::to_string(&full_result).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    // Verify Stage 3 fields present in API response shape
+    assert!(
+        parsed.get("tone_analysis").is_some(),
+        "Response must include tone_analysis"
+    );
+    assert!(
+        parsed.get("source_meta").is_some(),
+        "Response must include source_meta"
+    );
+    let tone = &parsed["tone_analysis"];
+    assert!(tone.get("rhetorical_devices").is_some());
+    assert!(tone.get("emotional_tone").is_some());
+    assert!(tone.get("framing_strategy").is_some());
+    assert!(tone.get("objectivity_score").is_some());
+    let source = &parsed["source_meta"];
+    assert!(source.get("publication").is_some());
+    assert!(source.get("known_bias").is_some());
+    assert!(source.get("ownership_type").is_some());
+
+    // Verify round-trip through JSON layer
+    let roundtripped: AnalysisResult = serde_json::from_str(&json).unwrap();
+    assert!(roundtripped.tone_analysis.is_some());
+    assert!(roundtripped.source_meta.is_some());
+    assert_eq!(roundtripped.tone_analysis.unwrap().emotional_tone, "urgent");
+    assert_eq!(
+        roundtripped.source_meta.unwrap().publication,
+        "The Guardian"
+    );
+}
+
+#[tokio::test]
+async fn store_history_body_includes_stage3_fields() {
+    use tower::Service;
+
+    let mut app = app_with_state();
+
+    // Create a StoreHistoryRequest with Stage 3 fields (tone_analysis + source_meta)
+    let body = serde_json::json!({
+        "source_url": "https://example.com/stage3",
+        "result": {
+            "title": "Stage 3 Article",
+            "source_url": "https://example.com/stage3",
+            "personas": [],
+            "debiaser": {
+                "consensus_points": [],
+                "disagreements": [],
+                "likely_bias_drivers": [],
+                "truth_seeking_summary": "Test.",
+                "spectrum_score": 0.0,
+                "spectrum_explain": "Test."
+            },
+            "tone_analysis": {
+                "rhetorical_devices": ["loaded language", "appeal to emotion"],
+                "emotional_tone": "inflammatory",
+                "framing_strategy": "morality frame",
+                "objectivity_score": 0.3
+            },
+            "source_meta": {
+                "publication": "The New York Times",
+                "known_bias": "center-left",
+                "ownership_type": "publicly-traded"
+            }
+        }
+    })
+    .to_string();
+
+    // Store
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/history")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    let store_resp = app.call(store_req).await.unwrap();
+    assert_eq!(store_resp.status(), StatusCode::CREATED);
+    let store_body = store_resp.into_body().collect().await.unwrap().to_bytes();
+    let store_json: serde_json::Value = serde_json::from_slice(&store_body).unwrap();
+    let id = store_json["id"].as_str().unwrap();
+
+    // Retrieve
+    let get_req = Request::builder()
+        .uri(format!("/history/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let get_resp = app.call(get_req).await.unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let get_body = get_resp.into_body().collect().await.unwrap().to_bytes();
+    let stored: serde_json::Value = serde_json::from_slice(&get_body).unwrap();
+
+    // Verify Stage 3 fields preserved in stored result
+    let response = &stored["response"];
+    assert!(
+        response.get("tone_analysis").is_some(),
+        "tone_analysis must be preserved"
+    );
+    assert!(
+        response.get("source_meta").is_some(),
+        "source_meta must be preserved"
+    );
+    assert_eq!(response["tone_analysis"]["emotional_tone"], "inflammatory");
+    assert_eq!(response["tone_analysis"]["objectivity_score"], 0.3);
+    assert_eq!(
+        response["tone_analysis"]["rhetorical_devices"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(response["source_meta"]["publication"], "The New York Times");
+    assert_eq!(response["source_meta"]["known_bias"], "center-left");
+    assert_eq!(response["source_meta"]["ownership_type"], "publicly-traded");
 }

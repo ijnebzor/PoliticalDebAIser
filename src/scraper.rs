@@ -2,11 +2,405 @@ use std::net::{IpAddr, ToSocketAddrs};
 use std::time::Duration;
 
 use scraper::{ElementRef, Html, Selector};
+use serde::{Deserialize, Serialize};
 
 use crate::models::{ArticleCache, ArticleContent};
 
 /// Maximum article body length in characters before truncation.
 const MAX_CONTENT_LENGTH: usize = 50_000;
+
+// =============================================================================
+// Source metadata extraction
+// =============================================================================
+
+/// Source metadata extracted from an article's URL/domain.
+/// This is the scraper-level extraction; routes.rs converts to models::SourceMeta for the API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScrapedSourceMeta {
+    /// Publication name (e.g., "The New York Times").
+    pub publication: String,
+    /// Domain of the source URL.
+    pub domain: String,
+    /// Known political leaning/bias indicator, if identified.
+    pub known_bias: Option<String>,
+    /// Type of media outlet (e.g., "mainstream", "wire_service", "public_media").
+    pub media_type: Option<String>,
+}
+
+/// Entry in the known publications database.
+struct KnownPublication {
+    name: &'static str,
+    bias: &'static str,
+    media_type: &'static str,
+}
+
+/// Static database of known news publications mapped by domain.
+/// Bias labels follow the Ad Fontes / AllSides spectrum:
+/// "left", "center-left", "center", "center-right", "right", "libertarian".
+fn lookup_known_publication(domain: &str) -> Option<&'static KnownPublication> {
+    static KNOWN: &[(&str, KnownPublication)] = &[
+        // Wire services
+        (
+            "reuters.com",
+            KnownPublication {
+                name: "Reuters",
+                bias: "center",
+                media_type: "wire_service",
+            },
+        ),
+        (
+            "apnews.com",
+            KnownPublication {
+                name: "Associated Press",
+                bias: "center",
+                media_type: "wire_service",
+            },
+        ),
+        // Public media
+        (
+            "bbc.com",
+            KnownPublication {
+                name: "BBC",
+                bias: "center",
+                media_type: "public_media",
+            },
+        ),
+        (
+            "bbc.co.uk",
+            KnownPublication {
+                name: "BBC",
+                bias: "center",
+                media_type: "public_media",
+            },
+        ),
+        (
+            "npr.org",
+            KnownPublication {
+                name: "NPR",
+                bias: "center-left",
+                media_type: "public_media",
+            },
+        ),
+        (
+            "abc.net.au",
+            KnownPublication {
+                name: "ABC News (Australia)",
+                bias: "center",
+                media_type: "public_media",
+            },
+        ),
+        (
+            "pbs.org",
+            KnownPublication {
+                name: "PBS",
+                bias: "center-left",
+                media_type: "public_media",
+            },
+        ),
+        // Mainstream (left / center-left)
+        (
+            "nytimes.com",
+            KnownPublication {
+                name: "The New York Times",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "washingtonpost.com",
+            KnownPublication {
+                name: "The Washington Post",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "cnn.com",
+            KnownPublication {
+                name: "CNN",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "msnbc.com",
+            KnownPublication {
+                name: "MSNBC",
+                bias: "left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "theguardian.com",
+            KnownPublication {
+                name: "The Guardian",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "huffpost.com",
+            KnownPublication {
+                name: "HuffPost",
+                bias: "left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "vox.com",
+            KnownPublication {
+                name: "Vox",
+                bias: "left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "slate.com",
+            KnownPublication {
+                name: "Slate",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "theatlantic.com",
+            KnownPublication {
+                name: "The Atlantic",
+                bias: "center-left",
+                media_type: "mainstream",
+            },
+        ),
+        // Mainstream (center)
+        (
+            "politico.com",
+            KnownPublication {
+                name: "Politico",
+                bias: "center",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "thehill.com",
+            KnownPublication {
+                name: "The Hill",
+                bias: "center",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "axios.com",
+            KnownPublication {
+                name: "Axios",
+                bias: "center",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "bloomberg.com",
+            KnownPublication {
+                name: "Bloomberg",
+                bias: "center",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "usatoday.com",
+            KnownPublication {
+                name: "USA Today",
+                bias: "center",
+                media_type: "mainstream",
+            },
+        ),
+        // Mainstream (center-right / right)
+        (
+            "wsj.com",
+            KnownPublication {
+                name: "The Wall Street Journal",
+                bias: "center-right",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "foxnews.com",
+            KnownPublication {
+                name: "Fox News",
+                bias: "right",
+                media_type: "mainstream",
+            },
+        ),
+        (
+            "nypost.com",
+            KnownPublication {
+                name: "New York Post",
+                bias: "right",
+                media_type: "tabloid",
+            },
+        ),
+        (
+            "dailymail.co.uk",
+            KnownPublication {
+                name: "Daily Mail",
+                bias: "right",
+                media_type: "tabloid",
+            },
+        ),
+        // Independent (left)
+        (
+            "theintercept.com",
+            KnownPublication {
+                name: "The Intercept",
+                bias: "left",
+                media_type: "independent",
+            },
+        ),
+        (
+            "jacobin.com",
+            KnownPublication {
+                name: "Jacobin",
+                bias: "left",
+                media_type: "independent",
+            },
+        ),
+        (
+            "motherjones.com",
+            KnownPublication {
+                name: "Mother Jones",
+                bias: "left",
+                media_type: "independent",
+            },
+        ),
+        // Independent (right)
+        (
+            "breitbart.com",
+            KnownPublication {
+                name: "Breitbart",
+                bias: "right",
+                media_type: "independent",
+            },
+        ),
+        (
+            "dailywire.com",
+            KnownPublication {
+                name: "The Daily Wire",
+                bias: "right",
+                media_type: "independent",
+            },
+        ),
+        (
+            "nationalreview.com",
+            KnownPublication {
+                name: "National Review",
+                bias: "right",
+                media_type: "independent",
+            },
+        ),
+        (
+            "thefederalist.com",
+            KnownPublication {
+                name: "The Federalist",
+                bias: "right",
+                media_type: "independent",
+            },
+        ),
+        // Libertarian
+        (
+            "reason.com",
+            KnownPublication {
+                name: "Reason",
+                bias: "libertarian",
+                media_type: "independent",
+            },
+        ),
+        // State-affiliated
+        (
+            "rt.com",
+            KnownPublication {
+                name: "RT (Russia Today)",
+                bias: "right",
+                media_type: "state_affiliated",
+            },
+        ),
+        (
+            "aljazeera.com",
+            KnownPublication {
+                name: "Al Jazeera",
+                bias: "center",
+                media_type: "state_affiliated",
+            },
+        ),
+    ];
+
+    KNOWN
+        .iter()
+        .find(|(d, _)| *d == domain)
+        .map(|(_, pub_info)| pub_info)
+}
+
+/// Extract source metadata from an article URL.
+///
+/// Looks up the domain against a database of known publications to identify
+/// the publication name, political leaning, and media type. For unknown domains,
+/// derives a publication name from the domain itself.
+pub fn extract_source_meta(url: &str) -> ScrapedSourceMeta {
+    let domain = extract_domain(url);
+
+    if let Some(known) = lookup_known_publication(&domain) {
+        return ScrapedSourceMeta {
+            publication: known.name.to_string(),
+            domain: domain.clone(),
+            known_bias: Some(known.bias.to_string()),
+            media_type: Some(known.media_type.to_string()),
+        };
+    }
+
+    // Unknown domain — derive a readable name from it
+    let publication = domain_to_publication_name(&domain);
+
+    ScrapedSourceMeta {
+        publication,
+        domain,
+        known_bias: None,
+        media_type: None,
+    }
+}
+
+/// Extract the registrable domain from a URL, stripping "www." prefix.
+fn extract_domain(url: &str) -> String {
+    let parsed = match url::Url::parse(url) {
+        Ok(u) => u,
+        Err(_) => return String::new(),
+    };
+    let host = match parsed.host_str() {
+        Some(h) => h.to_lowercase(),
+        None => return String::new(),
+    };
+    host.strip_prefix("www.").unwrap_or(&host).to_string()
+}
+
+/// Derive a human-readable publication name from a domain.
+/// E.g., "example-news.com" -> "Example News", "thedailybeast.com" -> "Thedailybeast".
+fn domain_to_publication_name(domain: &str) -> String {
+    // Strip TLD
+    let base = domain.split('.').next().unwrap_or(domain);
+    // Split on hyphens, capitalize each word
+    base.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(c) => {
+                    let upper: String = c.to_uppercase().collect();
+                    format!("{upper}{}", chars.as_str())
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+// =============================================================================
+// SSRF protection
+// =============================================================================
 
 /// Check if an IP address is private, loopback, or otherwise non-public.
 fn is_private_ip(ip: &IpAddr) -> bool {
@@ -40,8 +434,8 @@ struct ResolvedTarget {
 /// Validate that a URL does not target private/internal network addresses (SSRF protection).
 /// Returns the resolved IP so callers can pin the connection, preventing TOCTOU DNS rebinding.
 fn validate_url_target(url: &str) -> Result<ResolvedTarget, ScrapeError> {
-    let parsed = url::Url::parse(url)
-        .map_err(|_| ScrapeError::InvalidUrl("Malformed URL".to_string()))?;
+    let parsed =
+        url::Url::parse(url).map_err(|_| ScrapeError::InvalidUrl("Malformed URL".to_string()))?;
 
     let host = parsed
         .host_str()
@@ -171,8 +565,7 @@ impl std::fmt::Display for ScrapeError {
 
 impl std::error::Error for ScrapeError {}
 
-const ARCHIVE_DISCLAIMER: &str =
-    "This article was accessed via archive.ph for analysis purposes only. No copyright infringement intended.";
+const ARCHIVE_DISCLAIMER: &str = "This article was accessed via archive.ph for analysis purposes only. No copyright infringement intended.";
 
 /// Fetch and extract an article, using the cache to avoid repeat fetches.
 /// If the article is behind a paywall, automatically retries via archive.ph.
@@ -220,9 +613,7 @@ pub async fn scrape_article(
                     Ok(article)
                 }
                 Err(archive_err) => {
-                    tracing::warn!(
-                        "archive.ph fallback failed for {url}: {archive_err}"
-                    );
+                    tracing::warn!("archive.ph fallback failed for {url}: {archive_err}");
                     Err(ScrapeError::Paywall)
                 }
             }
@@ -233,7 +624,10 @@ pub async fn scrape_article(
 
 /// Fetch a URL and parse its HTML into ArticleContent.
 /// Uses a pinned client to prevent DNS rebinding TOCTOU attacks.
-async fn fetch_and_parse(url: &str, target: &ResolvedTarget) -> Result<ArticleContent, ScrapeError> {
+async fn fetch_and_parse(
+    url: &str,
+    target: &ResolvedTarget,
+) -> Result<ArticleContent, ScrapeError> {
     let client = build_pinned_client(target)?;
 
     let response = client.get(url).send().await.map_err(|e| {
@@ -261,12 +655,12 @@ async fn fetch_and_parse(url: &str, target: &ResolvedTarget) -> Result<ArticleCo
     }
 
     // Check content type is HTML
-    if let Some(ct) = response.headers().get(reqwest::header::CONTENT_TYPE) {
-        if let Ok(ct_str) = ct.to_str() {
-            if !ct_str.contains("text/html") && !ct_str.contains("application/xhtml") {
-                return Err(ScrapeError::NotHtml(ct_str.to_string()));
-            }
-        }
+    if let Some(ct) = response.headers().get(reqwest::header::CONTENT_TYPE)
+        && let Ok(ct_str) = ct.to_str()
+        && !ct_str.contains("text/html")
+        && !ct_str.contains("application/xhtml")
+    {
+        return Err(ScrapeError::NotHtml(ct_str.to_string()));
     }
 
     let html_text = response
@@ -361,10 +755,10 @@ fn extract_title(document: &Html) -> Option<String> {
         return Some(og_title);
     }
     // 2. Try <title> tag
-    if let Some(title) = select_text(document, "title") {
-        if !title.is_empty() {
-            return Some(title);
-        }
+    if let Some(title) = select_text(document, "title")
+        && !title.is_empty()
+    {
+        return Some(title);
     }
     // 3. Fall back to first <h1>
     select_text(document, "h1")
@@ -387,9 +781,20 @@ const STRIP_TAGS: &[&str] = &[
 
 /// Class substrings that indicate non-content elements.
 const STRIP_CLASSES: &[&str] = &[
-    "sidebar", "comment", "nav", "menu", "footer", "header",
-    "social-share", "share", "related", "ad-", "advertisement",
-    "promo", "newsletter", "popup",
+    "sidebar",
+    "comment",
+    "nav",
+    "menu",
+    "footer",
+    "header",
+    "social-share",
+    "share",
+    "related",
+    "ad-",
+    "advertisement",
+    "promo",
+    "newsletter",
+    "popup",
 ];
 
 /// Container selectors to try, in priority order. First match with enough text wins.
@@ -454,10 +859,7 @@ fn collect_text_recursive(element: ElementRef, parts: &mut Vec<String>) {
             // Skip elements with non-content class names
             if let Some(classes) = child_el.value().attr("class") {
                 let classes_lower = classes.to_lowercase();
-                if STRIP_CLASSES
-                    .iter()
-                    .any(|c| classes_lower.contains(c))
-                {
+                if STRIP_CLASSES.iter().any(|c| classes_lower.contains(c)) {
                     continue;
                 }
             }
@@ -536,7 +938,9 @@ mod tests {
 
     #[test]
     fn extract_title_from_title_tag() {
-        let html = Html::parse_document("<html><head><title>Test Title</title></head><body></body></html>");
+        let html = Html::parse_document(
+            "<html><head><title>Test Title</title></head><body></body></html>",
+        );
         assert_eq!(extract_title(&html), Some("Test Title".to_string()));
     }
 
@@ -631,7 +1035,10 @@ mod tests {
     #[test]
     fn collapse_whitespace_works() {
         assert_eq!(collapse_whitespace("  hello   world  "), "hello world");
-        assert_eq!(collapse_whitespace("no\nnewlines\there"), "no newlines here");
+        assert_eq!(
+            collapse_whitespace("no\nnewlines\there"),
+            "no newlines here"
+        );
         assert_eq!(collapse_whitespace(""), "");
         assert_eq!(collapse_whitespace("   "), "");
     }
@@ -679,13 +1086,36 @@ mod tests {
 
     #[test]
     fn scrape_error_display_messages() {
-        assert!(ScrapeError::InvalidUrl("bad".to_string()).to_string().contains("Invalid URL"));
-        assert!(ScrapeError::Timeout("slow".to_string()).to_string().contains("timed out"));
-        assert!(ScrapeError::FetchFailed("nope".to_string()).to_string().contains("Fetch failed"));
-        assert!(ScrapeError::EmptyContent.to_string().contains("no extractable text"));
+        assert!(
+            ScrapeError::InvalidUrl("bad".to_string())
+                .to_string()
+                .contains("Invalid URL")
+        );
+        assert!(
+            ScrapeError::Timeout("slow".to_string())
+                .to_string()
+                .contains("timed out")
+        );
+        assert!(
+            ScrapeError::FetchFailed("nope".to_string())
+                .to_string()
+                .contains("Fetch failed")
+        );
+        assert!(
+            ScrapeError::EmptyContent
+                .to_string()
+                .contains("no extractable text")
+        );
         assert!(ScrapeError::NotFound.to_string().contains("404"));
         assert!(ScrapeError::Paywall.to_string().contains("paywall"));
-        assert!(ScrapeError::NotHtml("application/pdf".to_string()).to_string().contains("non-HTML") || ScrapeError::NotHtml("application/pdf".to_string()).to_string().contains("Not an HTML"));
+        assert!(
+            ScrapeError::NotHtml("application/pdf".to_string())
+                .to_string()
+                .contains("non-HTML")
+                || ScrapeError::NotHtml("application/pdf".to_string())
+                    .to_string()
+                    .contains("Not an HTML")
+        );
     }
 
     #[test]
@@ -725,9 +1155,7 @@ mod tests {
     #[test]
     fn parse_html_truncates_long_content() {
         let long_text = "a ".repeat(MAX_CONTENT_LENGTH + 1000);
-        let html = format!(
-            "<html><body><article><p>{long_text}</p></article></body></html>"
-        );
+        let html = format!("<html><body><article><p>{long_text}</p></article></body></html>");
         let result = parse_html(&html, "https://example.com").unwrap();
         assert!(result.body_text.len() <= MAX_CONTENT_LENGTH);
     }
@@ -831,7 +1259,8 @@ mod tests {
 
     #[test]
     fn scoring_prefers_article_body_over_nav() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body>
                 <nav><a>Home</a> <a>About</a> <a>Contact</a></nav>
                 <article>
@@ -839,7 +1268,8 @@ mod tests {
                     <p>Another paragraph with meaningful article content about political analysis.</p>
                 </article>
             </body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("main article content"));
         assert!(!text.contains("Home"));
@@ -847,7 +1277,8 @@ mod tests {
 
     #[test]
     fn scoring_prefers_high_paragraph_density() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body>
                 <div class="sidebar"><p>Short sidebar text here.</p></div>
                 <article>
@@ -856,7 +1287,8 @@ mod tests {
                     <p>Third paragraph wrapping up with a conclusion on the matter at hand.</p>
                 </article>
             </body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("First paragraph"));
         assert!(!text.contains("Short sidebar text"));
@@ -866,12 +1298,14 @@ mod tests {
 
     #[test]
     fn strips_nav_elements() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body><article>
                 <nav><a>Menu Item 1</a> <a>Menu Item 2</a></nav>
                 <p>Actual article content that should be extracted and kept in the output.</p>
             </article></body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("Actual article content"));
         assert!(!text.contains("Menu Item"));
@@ -879,12 +1313,14 @@ mod tests {
 
     #[test]
     fn strips_footer_elements() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body><article>
                 <p>Article content that should remain in the extracted text for analysis.</p>
                 <footer>Copyright 2026 Example Corp. All rights reserved.</footer>
             </article></body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("Article content"));
         assert!(!text.contains("Copyright 2026"));
@@ -892,13 +1328,15 @@ mod tests {
 
     #[test]
     fn strips_elements_with_ad_class() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body><article>
                 <p>Real news article content about current political events and policy decisions.</p>
                 <div class="ad-container">Buy our product! Special offer inside!</div>
                 <p>More article content continuing the story about political developments today.</p>
             </article></body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("Real news article"));
         assert!(text.contains("More article content"));
@@ -907,12 +1345,14 @@ mod tests {
 
     #[test]
     fn strips_sidebar_class_elements() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body><article>
                 <p>Main article text with enough content to be extracted as the primary body.</p>
                 <div class="sidebar-widget">Related stories and sidebar content here.</div>
             </article></body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("Main article text"));
         assert!(!text.contains("Related stories and sidebar"));
@@ -920,13 +1360,15 @@ mod tests {
 
     #[test]
     fn strips_script_and_style_tags() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body><article>
                 <script>var x = "should not appear in output";</script>
                 <style>.article { color: red; }</style>
                 <p>Only this article content should appear in the final extracted text output.</p>
             </article></body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("Only this article content"));
         assert!(!text.contains("should not appear"));
@@ -937,7 +1379,8 @@ mod tests {
 
     #[test]
     fn extract_title_prefers_og_title() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html>
             <head>
                 <meta property="og:title" content="OG Title Here">
@@ -945,13 +1388,15 @@ mod tests {
             </head>
             <body><h1>H1 Title Here</h1></body>
             </html>
-        "#);
+        "#,
+        );
         assert_eq!(extract_title(&html), Some("OG Title Here".to_string()));
     }
 
     #[test]
     fn extract_title_falls_back_from_empty_og_title() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html>
             <head>
                 <meta property="og:title" content="">
@@ -959,7 +1404,8 @@ mod tests {
             </head>
             <body></body>
             </html>
-        "#);
+        "#,
+        );
         assert_eq!(extract_title(&html), Some("Fallback Title".to_string()));
     }
 
@@ -997,40 +1443,141 @@ mod tests {
 
     #[test]
     fn extracts_from_itemprop_article_body() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body>
                 <div itemprop="articleBody">
                     <p>This content is marked with the articleBody itemprop and should be extracted.</p>
                 </div>
             </body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("articleBody itemprop"));
     }
 
     #[test]
     fn extracts_from_entry_content_class() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body>
                 <div class="entry-content">
                     <p>WordPress-style entry content that should be properly extracted from the page.</p>
                 </div>
             </body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("WordPress-style entry content"));
     }
 
     #[test]
     fn extracts_from_role_main() {
-        let html = Html::parse_document(r#"
+        let html = Html::parse_document(
+            r#"
             <html><body>
                 <div role="main">
                     <p>Content inside a role=main element should be found and extracted properly.</p>
                 </div>
             </body></html>
-        "#);
+        "#,
+        );
         let text = extract_body_text(&html);
         assert!(text.contains("role=main element"));
+    }
+
+    // --- Source metadata extraction tests ---
+
+    #[test]
+    fn source_meta_known_publication() {
+        let meta = extract_source_meta("https://www.nytimes.com/2026/01/15/politics/article.html");
+        assert_eq!(meta.publication, "The New York Times");
+        assert_eq!(meta.domain, "nytimes.com");
+        assert_eq!(meta.known_bias.as_deref(), Some("center-left"));
+        assert_eq!(meta.media_type.as_deref(), Some("mainstream"));
+    }
+
+    #[test]
+    fn source_meta_wire_service() {
+        let meta = extract_source_meta("https://reuters.com/world/some-story");
+        assert_eq!(meta.publication, "Reuters");
+        assert_eq!(meta.known_bias.as_deref(), Some("center"));
+        assert_eq!(meta.media_type.as_deref(), Some("wire_service"));
+    }
+
+    #[test]
+    fn source_meta_state_affiliated() {
+        let meta = extract_source_meta("https://rt.com/news/article");
+        assert_eq!(meta.publication, "RT (Russia Today)");
+        assert_eq!(meta.media_type.as_deref(), Some("state_affiliated"));
+    }
+
+    #[test]
+    fn source_meta_unknown_domain() {
+        let meta = extract_source_meta("https://www.unknown-news-site.com/article");
+        assert_eq!(meta.publication, "Unknown News Site");
+        assert_eq!(meta.domain, "unknown-news-site.com");
+        assert!(meta.known_bias.is_none());
+        assert!(meta.media_type.is_none());
+    }
+
+    #[test]
+    fn source_meta_strips_www() {
+        let meta = extract_source_meta("https://www.foxnews.com/politics/story");
+        assert_eq!(meta.domain, "foxnews.com");
+        assert_eq!(meta.publication, "Fox News");
+    }
+
+    #[test]
+    fn source_meta_handles_invalid_url() {
+        let meta = extract_source_meta("not a url");
+        assert_eq!(meta.domain, "");
+        assert!(meta.known_bias.is_none());
+    }
+
+    #[test]
+    fn source_meta_handles_empty_url() {
+        let meta = extract_source_meta("");
+        assert_eq!(meta.domain, "");
+    }
+
+    #[test]
+    fn extract_domain_strips_www() {
+        assert_eq!(
+            extract_domain("https://www.example.com/path"),
+            "example.com"
+        );
+    }
+
+    #[test]
+    fn extract_domain_no_www() {
+        assert_eq!(extract_domain("https://example.com/path"), "example.com");
+    }
+
+    #[test]
+    fn extract_domain_preserves_subdomain() {
+        assert_eq!(
+            extract_domain("https://news.bbc.co.uk/article"),
+            "news.bbc.co.uk"
+        );
+    }
+
+    #[test]
+    fn domain_to_publication_name_simple() {
+        assert_eq!(domain_to_publication_name("example.com"), "Example");
+    }
+
+    #[test]
+    fn domain_to_publication_name_hyphenated() {
+        assert_eq!(domain_to_publication_name("daily-beast.com"), "Daily Beast");
+    }
+
+    #[test]
+    fn source_meta_serialization_roundtrip() {
+        let meta = extract_source_meta("https://www.washingtonpost.com/article");
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: ScrapedSourceMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.publication, "The Washington Post");
+        assert_eq!(deserialized.known_bias.as_deref(), Some("center-left"));
     }
 }

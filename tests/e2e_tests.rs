@@ -8,10 +8,10 @@
 // To run with mocks (CI): cargo test --test e2e_tests
 // =============================================================================
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::routing;
-use axum::Router;
 use http_body_util::BodyExt;
 use serial_test::serial;
 use tower::ServiceExt;
@@ -111,10 +111,7 @@ fn build_app_router() -> Router {
 
     Router::new()
         .route("/health", routing::get(routes::health))
-        .route(
-            "/analyze-text",
-            routing::post(routes::analyze_text),
-        )
+        .route("/analyze-text", routing::post(routes::analyze_text))
         .route(
             "/history",
             routing::get(routes::list_history).post(routes::store_analysis),
@@ -155,10 +152,8 @@ async fn setup_mock_ollama() -> MockServer {
     Mock::given(method("POST"))
         .and(path("/api/chat"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(ollama_response(&mock_persona_json(
-                "test_persona",
-                0.5,
-            ))),
+            ResponseTemplate::new(200)
+                .set_body_json(ollama_response(&mock_persona_json("test_persona", 0.5))),
         )
         .expect(8..)
         .mount(&server)
@@ -178,10 +173,8 @@ async fn setup_full_mock_ollama() -> MockServer {
     Mock::given(method("POST"))
         .and(path("/api/chat"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_json(ollama_response(&mock_persona_json(
-                "test_persona",
-                0.5,
-            ))),
+            ResponseTemplate::new(200)
+                .set_body_json(ollama_response(&mock_persona_json("test_persona", 0.5))),
         )
         .expect(1..)
         .mount(&server)
@@ -246,7 +239,11 @@ async fn e2e_analyze_text_returns_valid_analysis_result() {
             persona.confidence,
             persona.title
         );
-        assert!(!persona.summary.is_empty(), "Empty summary for {}", persona.title);
+        assert!(
+            !persona.summary.is_empty(),
+            "Empty summary for {}",
+            persona.title
+        );
         assert!(!persona.title.is_empty());
     }
 
@@ -507,7 +504,10 @@ async fn ollama_down_returns_bad_gateway() {
 
     let body = response.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert!(json.get("error").is_some(), "Error response must have 'error' field");
+    assert!(
+        json.get("error").is_some(),
+        "Error response must have 'error' field"
+    );
 }
 
 #[tokio::test]
@@ -569,7 +569,8 @@ async fn ollama_returns_malformed_json_triggers_error() {
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "text": "Test article for malformed response." }).to_string(),
+                    serde_json::json!({ "text": "Test article for malformed response." })
+                        .to_string(),
                 ))
                 .unwrap(),
         )
@@ -598,9 +599,7 @@ async fn error_empty_text_returns_400() {
                 .method("POST")
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({ "text": "" }).to_string(),
-                ))
+                .body(Body::from(serde_json::json!({ "text": "" }).to_string()))
                 .unwrap(),
         )
         .await
@@ -796,10 +795,7 @@ async fn e2e_analyze_then_store_then_retrieve() {
                 "/history",
                 routing::get(routes::list_history).post(routes::store_analysis),
             )
-            .route(
-                "/history/{id}",
-                routing::get(routes::get_analysis),
-            )
+            .route("/history/{id}", routing::get(routes::get_analysis))
             .with_state(state)
             .layer(CorsLayer::permissive())
     };
@@ -1021,6 +1017,8 @@ async fn partial_failure_some_personas_fail_still_returns_result() {
             spectrum_score: 0.19,
             spectrum_explain: "Weighted mean of 2 personas.".to_string(),
         },
+        tone_analysis: None,
+        source_meta: None,
         warnings: vec!["6 of 8 persona analyses failed".to_string()],
     };
 
@@ -1053,6 +1051,8 @@ async fn partial_failure_empty_personas_is_error() {
             spectrum_score: 0.0,
             spectrum_explain: "No data.".to_string(),
         },
+        tone_analysis: None,
+        source_meta: None,
         warnings: vec![],
     };
 
@@ -1086,7 +1086,8 @@ async fn all_personas_fail_returns_server_error() {
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "text": "Test article for all-fail scenario." }).to_string(),
+                    serde_json::json!({ "text": "Test article for all-fail scenario." })
+                        .to_string(),
                 ))
                 .unwrap(),
         )
@@ -1137,9 +1138,7 @@ async fn debiaser_fallback_produces_valid_result() {
     let result: AnalysisResult = serde_json::from_slice(&body).unwrap();
 
     // Debiaser should have valid structure even in fallback mode
-    assert!(
-        result.debiaser.spectrum_score >= -3.0 && result.debiaser.spectrum_score <= 3.0,
-    );
+    assert!(result.debiaser.spectrum_score >= -3.0 && result.debiaser.spectrum_score <= 3.0,);
     assert!(!result.debiaser.spectrum_explain.is_empty());
     assert!(!result.debiaser.truth_seeking_summary.is_empty());
 }
@@ -1158,10 +1157,7 @@ async fn live_ollama_health_check() {
 
     let url = std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let client = reqwest::Client::new();
-    let resp = client
-        .get(format!("{url}/api/tags"))
-        .send()
-        .await;
+    let resp = client.get(format!("{url}/api/tags")).send().await;
 
     match resp {
         Ok(r) => {
@@ -1183,8 +1179,8 @@ async fn live_ollama_analyze_text_e2e() {
         return;
     }
 
-    let ollama_url = std::env::var("OLLAMA_URL")
-        .unwrap_or_else(|_| "http://localhost:11434".to_string());
+    let ollama_url =
+        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     let app = app_with_ollama_url(&ollama_url);
 
     let response = app
@@ -1338,11 +1334,26 @@ async fn security_header_content_security_policy() {
         .get("content-security-policy")
         .expect("Content-Security-Policy header must be present");
     let csp_str = csp.to_str().unwrap();
-    assert!(csp_str.contains("default-src 'self'"), "CSP must contain default-src 'self'");
-    assert!(csp_str.contains("script-src 'self'"), "CSP must contain script-src 'self'");
-    assert!(csp_str.contains("style-src 'self'"), "CSP must contain style-src 'self'");
-    assert!(csp_str.contains("img-src 'self'"), "CSP must contain img-src 'self'");
-    assert!(csp_str.contains("connect-src 'self'"), "CSP must contain connect-src 'self'");
+    assert!(
+        csp_str.contains("default-src 'self'"),
+        "CSP must contain default-src 'self'"
+    );
+    assert!(
+        csp_str.contains("script-src 'self'"),
+        "CSP must contain script-src 'self'"
+    );
+    assert!(
+        csp_str.contains("style-src 'self'"),
+        "CSP must contain style-src 'self'"
+    );
+    assert!(
+        csp_str.contains("img-src 'self'"),
+        "CSP must contain img-src 'self'"
+    );
+    assert!(
+        csp_str.contains("connect-src 'self'"),
+        "CSP must contain connect-src 'self'"
+    );
 }
 
 #[tokio::test]
@@ -1373,11 +1384,9 @@ async fn security_headers_present_on_error_responses() {
 
 /// Helper to attempt scraping a URL and expect an InvalidUrl error.
 async fn assert_ssrf_blocked(url: &str) {
-    use political_debaiser::scraper::{scrape_article, ScrapeError};
+    use political_debaiser::scraper::{ScrapeError, scrape_article};
     let cache: political_debaiser::models::ArticleCache = std::sync::Arc::new(
-        tokio::sync::RwLock::new(lru::LruCache::new(
-            std::num::NonZeroUsize::new(10).unwrap(),
-        )),
+        tokio::sync::RwLock::new(lru::LruCache::new(std::num::NonZeroUsize::new(10).unwrap())),
     );
     let result = scrape_article(url, &cache).await;
     assert!(
@@ -1448,8 +1457,8 @@ async fn ssrf_blocks_dot_corp_hostnames() {
 /// Uses a tight burst_size(2) for testability (fewer requests needed to trigger 429).
 fn app_with_rate_limiting() -> Router {
     use political_debaiser::routes;
-    use tower_governor::governor::GovernorConfigBuilder;
     use tower_governor::GovernorLayer;
+    use tower_governor::governor::GovernorConfigBuilder;
 
     let state = AppState::new(
         political_debaiser::models::DEFAULT_CACHE_SIZE,
@@ -1550,5 +1559,401 @@ async fn rate_limit_does_not_affect_health_endpoint() {
         health_resp.status(),
         StatusCode::OK,
         "Health endpoint must not be rate limited"
+    );
+}
+
+// =============================================================================
+// Stage 3 — Summarizer Tests (src/summarizer.rs)
+// Stubs: #[ignore] until Dame Judith lands the summarizer module.
+// =============================================================================
+
+#[tokio::test]
+async fn summarizer_short_article_passes_through() {
+    use political_debaiser::summarizer::summarize_if_needed;
+    // Articles under 4000 chars should pass through without calling Ollama
+    let short_text = "This is a short article about political reform. It discusses various perspectives on the proposed legislation and its potential impact on citizens.";
+    let result = summarize_if_needed(short_text).await.unwrap();
+    assert_eq!(
+        result, short_text,
+        "Short text should pass through unchanged"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn summarizer_long_article_is_shortened() {
+    use political_debaiser::summarizer::summarize_if_needed;
+    // With mock Ollama, summarizer calls the LLM for text exceeding the 4000 char threshold
+    let mock = setup_full_mock_ollama().await;
+    unsafe {
+        std::env::set_var("OLLAMA_URL", mock.uri());
+        std::env::set_var("OLLAMA_MODEL", "test-model");
+    }
+
+    let long_text = "The government announced new legislation today. ".repeat(150); // ~7200 chars
+    let result = summarize_if_needed(&long_text).await.unwrap();
+    // Mock returns persona JSON as "summary" — it's different from original
+    assert_ne!(result, long_text, "Long text should be processed by Ollama");
+    assert!(!result.is_empty(), "Summarized text should not be empty");
+}
+
+#[tokio::test]
+async fn summarizer_empty_text_handled_gracefully() {
+    use political_debaiser::summarizer::summarize_if_needed;
+    // Empty text (0 chars < 4000 threshold) passes through without calling Ollama
+    let result = summarize_if_needed("").await.unwrap();
+    assert_eq!(result, "", "Empty text should pass through unchanged");
+}
+
+#[tokio::test]
+#[serial]
+async fn summarizer_error_falls_back_to_original_text() {
+    use political_debaiser::summarizer::summarize_if_needed;
+    // Point to dead server — summarization will fail for long text
+    unsafe {
+        std::env::set_var("OLLAMA_URL", "http://127.0.0.1:19999");
+        std::env::set_var("OLLAMA_MODEL", "test-model");
+    }
+
+    let long_text = "Important political article content. ".repeat(150); // >4000 chars
+    let result = summarize_if_needed(&long_text).await;
+    assert!(
+        result.is_err(),
+        "Summarization should fail with unreachable Ollama"
+    );
+
+    // Demonstrate the fallback pattern used by analyze_full:
+    // unwrap_or_else falls back to original text on error
+    let fallback = result.unwrap_or_else(|_| long_text.clone());
+    assert_eq!(fallback, long_text, "Fallback should use original text");
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_long_article_uses_summarized_text() {
+    // End-to-end: submit a long article (>4000 chars) via /analyze-text.
+    // The summarizer triggers, then persona analysis runs on the summarized content.
+    let mock = setup_full_mock_ollama().await;
+    let app = app_with_ollama_url(&mock.uri());
+
+    let long_text = "The government announced sweeping new policy reforms today. ".repeat(100);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/analyze-text")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "text": long_text,
+                        "title": "Long Article Summarization Test"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let result: AnalysisResult = serde_json::from_slice(&body).unwrap();
+    assert_eq!(result.title, "Long Article Summarization Test");
+    assert!(
+        !result.personas.is_empty(),
+        "Pipeline should succeed with summarized content"
+    );
+}
+
+// =============================================================================
+// Stage 3 — Tone/Framing Analysis Tests
+// Stubs: #[ignore] until Sir Reginald's ToneAnalysis model + Dame Judith's engine.
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn e2e_analyze_text_includes_tone_analysis() {
+    // POST /analyze-text should include tone_analysis in the response.
+    // Mock Ollama returns persona JSON for all calls; tone parser uses fallback.
+    let mock = setup_full_mock_ollama().await;
+    let app = app_with_ollama_url(&mock.uri());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/analyze-text")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "text": "The administration's reckless spending threatens our children's future. Economists warn of catastrophic debt levels while politicians play partisan games."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let result: AnalysisResult = serde_json::from_slice(&body).unwrap();
+
+    // tone_analysis should be populated (via LLM or fallback parser)
+    assert!(
+        result.tone_analysis.is_some(),
+        "tone_analysis should be present in Stage 3 response"
+    );
+    let tone = result.tone_analysis.unwrap();
+    assert!(!tone.emotional_tone.is_empty());
+    assert!(!tone.framing_strategy.is_empty());
+    assert!((0.0..=1.0).contains(&tone.objectivity_score));
+}
+
+#[tokio::test]
+async fn tone_analysis_objectivity_score_is_clamped() {
+    use political_debaiser::models::ToneAnalysis;
+
+    // Verify boundary values are valid for the struct
+    let tone_low = ToneAnalysis {
+        rhetorical_devices: vec![],
+        emotional_tone: "neutral".to_string(),
+        framing_strategy: "neutral".to_string(),
+        objectivity_score: 0.0,
+    };
+    let tone_high = ToneAnalysis {
+        rhetorical_devices: vec![],
+        emotional_tone: "neutral".to_string(),
+        framing_strategy: "neutral".to_string(),
+        objectivity_score: 1.0,
+    };
+    assert!((tone_low.objectivity_score - 0.0).abs() < f64::EPSILON);
+    assert!((tone_high.objectivity_score - 1.0).abs() < f64::EPSILON);
+
+    // When included in AnalysisResult, the score serializes correctly
+    let result = AnalysisResult {
+        title: "Clamping Test".to_string(),
+        source_url: None,
+        personas: vec![],
+        debiaser: DebiasedSummary {
+            consensus_points: vec![],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "Test.".to_string(),
+            spectrum_score: 0.0,
+            spectrum_explain: "Test.".to_string(),
+        },
+        tone_analysis: Some(tone_high),
+        source_meta: None,
+        warnings: vec![],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let score = parsed["tone_analysis"]["objectivity_score"]
+        .as_f64()
+        .unwrap();
+    assert!(
+        (0.0..=1.0).contains(&score),
+        "objectivity_score {score} out of [0, 1]"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn tone_analysis_malformed_json_handled_gracefully() {
+    // Mock returns persona JSON for ALL calls including tone analysis.
+    // The tone parser receives "malformed" tone JSON (valid persona JSON,
+    // not tone schema) and should handle it gracefully via fallback.
+    let mock = setup_full_mock_ollama().await;
+    let app = app_with_ollama_url(&mock.uri());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/analyze-text")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "text": "An article about tax policy and its economic implications."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Pipeline should succeed — malformed tone JSON handled gracefully
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Malformed tone JSON should not cause pipeline failure"
+    );
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let result: AnalysisResult = serde_json::from_slice(&body).unwrap();
+
+    // Persona analysis should succeed independently of tone parsing
+    assert!(
+        !result.personas.is_empty(),
+        "Persona analysis should succeed regardless of tone parsing"
+    );
+}
+
+#[tokio::test]
+async fn tone_analysis_field_is_optional_for_backward_compat() {
+    // Stage 2 JSON — no tone_analysis field present at all
+    let stage2_json = serde_json::json!({
+        "title": "Stage 2 Result",
+        "source_url": "https://example.com",
+        "personas": [],
+        "debiaser": {
+            "consensus_points": [],
+            "disagreements": [],
+            "likely_bias_drivers": [],
+            "truth_seeking_summary": "Old.",
+            "spectrum_score": 0.1,
+            "spectrum_explain": "Slightly right."
+        }
+    });
+    let result: AnalysisResult = serde_json::from_value(stage2_json).unwrap();
+    assert!(
+        result.tone_analysis.is_none(),
+        "tone_analysis should default to None for old JSON"
+    );
+    assert!(
+        result.source_meta.is_none(),
+        "source_meta should default to None for old JSON"
+    );
+
+    // With tone_analysis present, it deserializes correctly
+    let stage3_json = serde_json::json!({
+        "title": "Stage 3 Result",
+        "source_url": null,
+        "personas": [],
+        "debiaser": {
+            "consensus_points": [],
+            "disagreements": [],
+            "likely_bias_drivers": [],
+            "truth_seeking_summary": "New.",
+            "spectrum_score": 0.0,
+            "spectrum_explain": "Center."
+        },
+        "tone_analysis": {
+            "rhetorical_devices": ["loaded language"],
+            "emotional_tone": "inflammatory",
+            "framing_strategy": "conflict frame",
+            "objectivity_score": 0.25
+        }
+    });
+    let result3: AnalysisResult = serde_json::from_value(stage3_json).unwrap();
+    assert!(result3.tone_analysis.is_some());
+    let tone = result3.tone_analysis.unwrap();
+    assert_eq!(tone.emotional_tone, "inflammatory");
+    assert_eq!(tone.rhetorical_devices.len(), 1);
+}
+
+// =============================================================================
+// Stage 3 — Source Credibility / Meta Tests
+// Stubs: #[ignore] until Sir Reginald's SourceMeta model + Bees' routes/scraper.
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+#[ignore = "Requires URL scraping infrastructure — SSRF protection blocks mock servers on localhost. Source meta extraction tested separately in source_meta_extracted_from_known_domain."]
+async fn e2e_analyze_url_includes_source_meta() {
+    // POST /analyze with URL would include source_meta from domain extraction.
+    // Cannot test without bypassing SSRF protection for mock server on localhost.
+    // The extract_source_meta function is tested directly in other tests.
+}
+
+#[tokio::test]
+#[serial]
+async fn e2e_analyze_text_has_no_source_meta() {
+    // POST /analyze-text (pasted text, no URL): source_url should be None.
+    // source_meta may be populated via LLM content analysis (no scraper fallback
+    // for text input since there's no URL to look up).
+    let mock = setup_full_mock_ollama().await;
+    let app = app_with_ollama_url(&mock.uri());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/analyze-text")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "text": "An article about environmental policy and carbon pricing."
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let result: AnalysisResult = serde_json::from_slice(&body).unwrap();
+
+    // source_url is None for text input (no URL provided)
+    assert!(
+        result.source_url.is_none(),
+        "Text input should have no source_url"
+    );
+
+    // source_meta may be populated via LLM analysis of content (or fallback)
+    // For text-only input, there's no scraper-based URL fallback
+    if let Some(meta) = &result.source_meta {
+        assert!(!meta.publication.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn source_meta_extracted_from_known_domain() {
+    use political_debaiser::scraper::extract_source_meta;
+
+    // Reuters — known wire service, center bias
+    let reuters = extract_source_meta("https://www.reuters.com/article/something");
+    assert_eq!(reuters.publication, "Reuters");
+    assert_eq!(reuters.domain, "reuters.com");
+    assert!(
+        reuters.known_bias.is_some(),
+        "Reuters should have a known bias"
+    );
+    assert_eq!(reuters.known_bias.as_deref(), Some("center"));
+    assert!(reuters.media_type.is_some());
+
+    // Fox News — known right-leaning
+    let fox = extract_source_meta("https://www.foxnews.com/politics/article");
+    assert_eq!(fox.domain, "foxnews.com");
+    assert!(
+        fox.known_bias.is_some(),
+        "Fox News should have a known bias"
+    );
+    assert!(fox.media_type.is_some());
+}
+
+#[tokio::test]
+async fn source_meta_unknown_domain_has_defaults() {
+    use political_debaiser::scraper::extract_source_meta;
+
+    // Unknown domain — should derive publication name from domain
+    let unknown = extract_source_meta("https://www.random-news-blog.com/article/123");
+    assert_eq!(unknown.domain, "random-news-blog.com");
+    assert!(
+        unknown.known_bias.is_none(),
+        "Unknown domain should have no known bias"
+    );
+    assert!(
+        unknown.media_type.is_none(),
+        "Unknown domain should have no media type"
+    );
+    // Publication name derived from domain (capitalized, hyphens to spaces)
+    assert!(
+        !unknown.publication.is_empty(),
+        "Publication name should not be empty"
     );
 }

@@ -492,6 +492,80 @@ function buildPersonaCard(p) {
   return card;
 }
 
+// ── Render: Source Credibility ──
+
+function renderSourceCredibility(rawData) {
+  var section = document.getElementById('source-credibility');
+  var meta = rawData.source_meta;
+  if (!meta) {
+    section.classList.remove('active');
+    return;
+  }
+  document.getElementById('source-publication').textContent = meta.publication || 'Unknown';
+
+  var biasEl = document.getElementById('source-bias');
+  var bias = meta.known_bias || 'unknown';
+  biasEl.textContent = bias;
+  biasEl.className = 'source-cred-badge';
+  var biasLower = bias.toLowerCase();
+  if (biasLower.indexOf('left') !== -1 && biasLower.indexOf('center') === -1) {
+    biasEl.classList.add('left');
+  } else if (biasLower.indexOf('right') !== -1 && biasLower.indexOf('center') === -1) {
+    biasEl.classList.add('right');
+  } else if (biasLower.indexOf('center') !== -1 || biasLower.indexOf('centre') !== -1) {
+    biasEl.classList.add('center');
+  } else {
+    biasEl.classList.add('unknown');
+  }
+
+  document.getElementById('source-ownership').textContent = meta.ownership_type || 'Unknown';
+  section.classList.add('active');
+}
+
+// ── Render: Tone & Framing Analysis ──
+
+function renderToneAnalysis(rawData) {
+  var section = document.getElementById('tone-section');
+  var tone = rawData.tone_analysis;
+  if (!tone) {
+    section.classList.remove('active');
+    return;
+  }
+
+  // Objectivity score (0-1)
+  var score = typeof tone.objectivity_score === 'number' ? tone.objectivity_score : 0;
+  var pct = Math.round(clamp(score, 0, 1) * 100);
+  document.getElementById('tone-obj-fill').style.width = pct + '%';
+  document.getElementById('tone-obj-value').textContent = pct + '%';
+
+  // Emotional tone badge
+  var emotionalEl = document.getElementById('tone-emotional');
+  emotionalEl.textContent = tone.emotional_tone || 'Unknown';
+
+  // Framing strategy
+  document.getElementById('tone-framing').textContent = tone.framing_strategy || 'Not identified';
+
+  // Rhetorical devices — tag list
+  var devicesList = document.getElementById('tone-devices-list');
+  devicesList.innerHTML = '';
+  var devices = tone.rhetorical_devices || [];
+  if (devices.length > 0) {
+    devices.forEach(function(d) {
+      var tag = document.createElement('span');
+      tag.className = 'tone-device-tag';
+      tag.textContent = d;
+      devicesList.appendChild(tag);
+    });
+  } else {
+    var none = document.createElement('span');
+    none.className = 'tone-device-tag';
+    none.textContent = 'None detected';
+    devicesList.appendChild(none);
+  }
+
+  show(section);
+}
+
 // ── Render: Full Results ──
 
 function renderResults(rawData, sourceUrl) {
@@ -510,9 +584,15 @@ function renderResults(rawData, sourceUrl) {
     sourceLink.style.display = 'none';
   }
 
+  // Source credibility (renders if source_meta present)
+  renderSourceCredibility(rawData);
+
   // Summary text: prefer raw article_summary (legacy), fall back to debiaser summary
   var summaryText = rawData.article_summary || data.debiaser.truth_seeking_summary || '';
   document.getElementById('article-summary-text').textContent = summaryText;
+
+  // Tone & framing analysis (renders if tone_analysis present)
+  renderToneAnalysis(rawData);
 
   // Spectrum bar
   renderSpectrum(data.debiaser.spectrum_score || 0);

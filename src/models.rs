@@ -111,6 +111,30 @@ pub struct DebiasedSummary {
     pub spectrum_explain: String,
 }
 
+/// Tone and framing analysis of the article's writing style.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToneAnalysis {
+    /// Rhetorical devices detected (e.g., "appeal to fear", "loaded language").
+    pub rhetorical_devices: Vec<String>,
+    /// Overall emotional tone (e.g., "alarmist", "measured", "inflammatory").
+    pub emotional_tone: String,
+    /// Framing strategy used by the author (e.g., "conflict frame", "human interest").
+    pub framing_strategy: String,
+    /// Objectivity score: 0.0 (highly subjective) to 1.0 (highly objective).
+    pub objectivity_score: f64,
+}
+
+/// Metadata about the article's source/publication.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceMeta {
+    /// Publication or outlet name (e.g., "The Guardian", "Fox News").
+    pub publication: String,
+    /// Known editorial bias direction, if any (e.g., "left-leaning", "right-leaning", "centrist").
+    pub known_bias: Option<String>,
+    /// Ownership structure type (e.g., "corporate", "non-profit", "state-owned").
+    pub ownership_type: Option<String>,
+}
+
 /// Full analysis result returned to the client (v3).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
@@ -118,6 +142,12 @@ pub struct AnalysisResult {
     pub source_url: Option<String>,
     pub personas: Vec<PersonaOutput>,
     pub debiaser: DebiasedSummary,
+    /// Tone and framing analysis of the article's writing style.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tone_analysis: Option<ToneAnalysis>,
+    /// Metadata about the article's source/publication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_meta: Option<SourceMeta>,
     /// Warnings from partial failures (e.g., "2/8 personas failed").
     /// Empty in the happy path; present when some personas failed but
     /// enough succeeded to produce a useful result.
@@ -195,10 +225,12 @@ impl AppState {
     pub fn new(cache_size: usize, store_size: usize) -> Self {
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(cache_size).unwrap_or(NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap()),
+                NonZeroUsize::new(cache_size)
+                    .unwrap_or(NonZeroUsize::new(DEFAULT_CACHE_SIZE).unwrap()),
             ))),
             store: Arc::new(RwLock::new(LruCache::new(
-                NonZeroUsize::new(store_size).unwrap_or(NonZeroUsize::new(DEFAULT_STORE_SIZE).unwrap()),
+                NonZeroUsize::new(store_size)
+                    .unwrap_or(NonZeroUsize::new(DEFAULT_STORE_SIZE).unwrap()),
             ))),
         }
     }
@@ -269,7 +301,11 @@ mod tests {
         let mut deduped = titles.clone();
         deduped.sort();
         deduped.dedup();
-        assert_eq!(titles.len(), deduped.len(), "Duplicate persona variants found");
+        assert_eq!(
+            titles.len(),
+            deduped.len(),
+            "Duplicate persona variants found"
+        );
     }
 
     #[test]
@@ -411,6 +447,8 @@ mod tests {
                 spectrum_score: 0.0,
                 spectrum_explain: "Neutral.".to_string(),
             },
+            tone_analysis: None,
+            source_meta: None,
             warnings: vec![],
         };
         let json = serde_json::to_string(&result).unwrap();
@@ -436,6 +474,8 @@ mod tests {
                 spectrum_score: 0.0,
                 spectrum_explain: "N/A".to_string(),
             },
+            tone_analysis: None,
+            source_meta: None,
             warnings: vec![],
         };
         let json = serde_json::to_string(&result).unwrap();
@@ -457,7 +497,11 @@ mod tests {
                 spectrum_score: 0.0,
                 spectrum_explain: "N/A".to_string(),
             },
-            warnings: vec!["2/8 personas failed: Progressive Activist, Centrist Technocrat".to_string()],
+            tone_analysis: None,
+            source_meta: None,
+            warnings: vec![
+                "2/8 personas failed: Progressive Activist, Centrist Technocrat".to_string(),
+            ],
         };
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("warnings"));
@@ -559,9 +603,9 @@ mod tests {
 
     #[test]
     fn article_cache_type_is_arc_rwlock() {
-        let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(
-            LruCache::new(NonZeroUsize::new(10).unwrap()),
-        ));
+        let cache: ArticleCache = std::sync::Arc::new(tokio::sync::RwLock::new(LruCache::new(
+            NonZeroUsize::new(10).unwrap(),
+        )));
         assert!(std::sync::Arc::strong_count(&cache) == 1);
     }
 
@@ -582,5 +626,144 @@ mod tests {
         assert_eq!(id2.len(), 8);
         assert!(id1.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(id2.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn tone_analysis_serialization_roundtrip() {
+        let tone = ToneAnalysis {
+            rhetorical_devices: vec!["appeal to fear".to_string(), "loaded language".to_string()],
+            emotional_tone: "alarmist".to_string(),
+            framing_strategy: "conflict frame".to_string(),
+            objectivity_score: 0.35,
+        };
+        let json = serde_json::to_string(&tone).unwrap();
+        let deserialized: ToneAnalysis = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.rhetorical_devices.len(), 2);
+        assert_eq!(deserialized.emotional_tone, "alarmist");
+        assert_eq!(deserialized.framing_strategy, "conflict frame");
+        assert!((deserialized.objectivity_score - 0.35).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn tone_analysis_empty_devices() {
+        let tone = ToneAnalysis {
+            rhetorical_devices: vec![],
+            emotional_tone: "measured".to_string(),
+            framing_strategy: "neutral reporting".to_string(),
+            objectivity_score: 0.92,
+        };
+        let json = serde_json::to_string(&tone).unwrap();
+        let deserialized: ToneAnalysis = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.rhetorical_devices.is_empty());
+    }
+
+    #[test]
+    fn source_meta_serialization_roundtrip() {
+        let meta = SourceMeta {
+            publication: "The Guardian".to_string(),
+            known_bias: Some("left-leaning".to_string()),
+            ownership_type: Some("corporate".to_string()),
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: SourceMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.publication, "The Guardian");
+        assert_eq!(deserialized.known_bias, Some("left-leaning".to_string()));
+        assert_eq!(deserialized.ownership_type, Some("corporate".to_string()));
+    }
+
+    #[test]
+    fn source_meta_with_none_fields() {
+        let meta = SourceMeta {
+            publication: "Unknown Blog".to_string(),
+            known_bias: None,
+            ownership_type: None,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let deserialized: SourceMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.publication, "Unknown Blog");
+        assert!(deserialized.known_bias.is_none());
+        assert!(deserialized.ownership_type.is_none());
+    }
+
+    #[test]
+    fn analysis_result_with_tone_and_source_serializes() {
+        let result = AnalysisResult {
+            title: "Test".to_string(),
+            source_url: Some("https://example.com".to_string()),
+            personas: vec![],
+            debiaser: DebiasedSummary {
+                consensus_points: vec![],
+                disagreements: vec![],
+                likely_bias_drivers: vec![],
+                truth_seeking_summary: "Test.".to_string(),
+                spectrum_score: 0.0,
+                spectrum_explain: "Test.".to_string(),
+            },
+            tone_analysis: Some(ToneAnalysis {
+                rhetorical_devices: vec!["loaded language".to_string()],
+                emotional_tone: "inflammatory".to_string(),
+                framing_strategy: "conflict frame".to_string(),
+                objectivity_score: 0.2,
+            }),
+            source_meta: Some(SourceMeta {
+                publication: "Fox News".to_string(),
+                known_bias: Some("right-leaning".to_string()),
+                ownership_type: Some("corporate".to_string()),
+            }),
+            warnings: vec![],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("tone_analysis"));
+        assert!(json.contains("source_meta"));
+        assert!(json.contains("rhetorical_devices"));
+        assert!(json.contains("objectivity_score"));
+        assert!(json.contains("publication"));
+        assert!(json.contains("known_bias"));
+    }
+
+    #[test]
+    fn analysis_result_without_tone_and_source_omits_fields() {
+        let result = AnalysisResult {
+            title: "Test".to_string(),
+            source_url: None,
+            personas: vec![],
+            debiaser: DebiasedSummary {
+                consensus_points: vec![],
+                disagreements: vec![],
+                likely_bias_drivers: vec![],
+                truth_seeking_summary: "Test.".to_string(),
+                spectrum_score: 0.0,
+                spectrum_explain: "Test.".to_string(),
+            },
+            tone_analysis: None,
+            source_meta: None,
+            warnings: vec![],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        // tone_analysis and source_meta should be omitted when None
+        assert!(!json.contains("tone_analysis"));
+        assert!(!json.contains("source_meta"));
+    }
+
+    #[test]
+    fn analysis_result_deserializes_without_tone_and_source() {
+        // Backward-compat: old JSON without tone_analysis/source_meta should deserialize
+        let json = r#"{
+            "title": "Old format",
+            "source_url": null,
+            "personas": [],
+            "debiaser": {
+                "consensus_points": [],
+                "disagreements": [],
+                "likely_bias_drivers": [],
+                "truth_seeking_summary": "Test.",
+                "spectrum_score": 0.0,
+                "spectrum_explain": "Test."
+            }
+        }"#;
+        let result: AnalysisResult = serde_json::from_str(json).unwrap();
+        assert!(result.tone_analysis.is_none());
+        assert!(result.source_meta.is_none());
+        assert!(result.warnings.is_empty());
     }
 }

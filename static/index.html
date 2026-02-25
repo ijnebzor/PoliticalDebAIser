@@ -131,6 +131,21 @@
       <article id="article-info" class="article-info-card">
         <h2 id="article-title"></h2>
         <a id="article-source" class="article-source" href="#" target="_blank" rel="noopener noreferrer"></a>
+        <!-- Source Credibility -->
+        <div id="source-credibility" class="source-credibility">
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Publication:</span>
+            <span id="source-publication" class="source-cred-value"></span>
+          </div>
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Known bias:</span>
+            <span id="source-bias" class="source-cred-badge"></span>
+          </div>
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Ownership:</span>
+            <span id="source-ownership" class="source-cred-value"></span>
+          </div>
+        </div>
         <p id="article-summary-text" class="article-summary-text"></p>
         <div id="export-buttons" class="export-buttons">
           <button id="export-json" class="btn-export" title="Download as JSON">Export JSON</button>
@@ -171,6 +186,34 @@
             <span id="meter-stdev" class="meter-stdev"></span>
           </div>
           <p id="meter-clusters" class="meter-clusters"></p>
+        </div>
+      </section>
+
+      <!-- Tone & Framing Analysis -->
+      <section id="tone-section" class="panel tone-section">
+        <h3 class="panel-title">Tone &amp; framing analysis</h3>
+        <div class="tone-grid">
+          <div class="tone-objectivity">
+            <span class="tone-obj-label">Objectivity</span>
+            <div class="tone-obj-track">
+              <div id="tone-obj-fill" class="tone-obj-fill"></div>
+            </div>
+            <span id="tone-obj-value" class="tone-obj-value"></span>
+          </div>
+          <div class="tone-meta">
+            <div class="tone-meta-row">
+              <span class="tone-meta-label">Emotional tone:</span>
+              <span id="tone-emotional" class="tone-badge"></span>
+            </div>
+            <div class="tone-meta-row">
+              <span class="tone-meta-label">Framing strategy:</span>
+              <span id="tone-framing" class="tone-framing-value"></span>
+            </div>
+          </div>
+        </div>
+        <div class="tone-devices">
+          <span class="tone-devices-label">Rhetorical devices:</span>
+          <div id="tone-devices-list" class="tone-devices-list"></div>
         </div>
       </section>
 
