@@ -160,9 +160,9 @@ function clusterByAgreement(sorted, gap) {
 function colourForAxes(economic, social) {
   var e = clamp(economic, -3, 3);
   var s = clamp(social, -3, 3);
-  var h = 220 + ((e + 3) / 6) * 120;
-  var l = 60 - ((s + 3) / 6) * 25;
-  return 'hsl(' + h.toFixed(0) + ', 70%, ' + l.toFixed(0) + '%)';
+  var h = 180 + ((e + 3) / 6) * 180;
+  var l = 55 + ((s + 3) / 6) * 15;
+  return 'hsl(' + h.toFixed(0) + ', 80%, ' + l.toFixed(0) + '%)';
 }
 
 // ── Error Handling ──
@@ -266,6 +266,17 @@ var PERSONA_NAMES = [
   'Populist, Anti-elite'
 ];
 
+var PERSONA_ICONS = {
+  'progressive_activist': '\u270A',      // raised fist
+  'social_democrat': '\u2696',            // balance scale (⚖)
+  'centrist_technocrat': '\u2699',        // gear (⚙)
+  'civil_libertarian': '\uD83D\uDD13',   // unlocked padlock (🔓)
+  'fiscal_conservative': '\uD83D\uDCB0', // money bag (💰)
+  'security_hawk': '\uD83E\uDD85',       // eagle (🦅)
+  'green_environmentalist': '\uD83C\uDF3F', // herb/leaf (🌿)
+  'populist_antiestablishment': '\uD83D\uDCE2'  // loudspeaker (📢)
+};
+
 var progressInterval = null;
 var progressValue = 0;
 var progressPersonaIdx = 0;
@@ -274,7 +285,7 @@ function showProgress(message) {
   progressValue = 0;
   progressPersonaIdx = 0;
   progressBarFill.style.width = '0%';
-  progressText.textContent = message || 'Analysing article...';
+  progressText.textContent = message || 'Analysing article\u2026 This typically takes 30\u201360 seconds.';
   show(progressLoader);
 
   // Simulate progress with persona names cycling
@@ -290,11 +301,11 @@ function showProgress(message) {
     } else if (progressValue < 75) {
       var name = PERSONA_NAMES[progressPersonaIdx % PERSONA_NAMES.length];
       progressText.textContent = 'Analysing as ' + name + '... (' + (progressPersonaIdx + 1) + '/8)';
-      progressPersonaIdx++;
+      if (progressPersonaIdx < 8) progressPersonaIdx++;
     } else if (progressValue < 82) {
       progressText.textContent = 'Synthesising debiased summary...';
     } else {
-      progressText.textContent = 'Almost done...';
+      progressText.textContent = 'Finalising analysis\u2026 almost there.';
     }
   }, 800);
 }
@@ -446,8 +457,12 @@ function buildPersonaCard(p) {
   var conf = Math.round((p.confidence || 0) * 100);
   var stanceText = (p.stance_score >= 0 ? '+' : '') + p.stance_score.toFixed(1);
 
+  var icon = PERSONA_ICONS[p.id] || '\uD83D\uDC64';
   var html = '<div class="persona-card-header">' +
-    '<h4 class="persona-title">' + escapeHtml(p.title) + '</h4>' +
+    '<div class="persona-title-row">' +
+      '<span class="persona-icon">' + icon + '</span>' +
+      '<h4 class="persona-title">' + escapeHtml(p.title) + '</h4>' +
+    '</div>' +
     '<span class="persona-badge">Score ' + stanceText + ' &middot; Conf ' + conf + '%</span>' +
   '</div>' +
   '<p class="persona-summary">' + escapeHtml(p.summary) + '</p>';
@@ -623,31 +638,29 @@ function renderResults(rawData, sourceUrl) {
     hide(partialNotice);
   }
 
-  // Persona clusters
+  // Persona cards — sorted by agreement (closest to center first, extremes last)
   var clustersContainer = document.getElementById('persona-clusters');
   clustersContainer.innerHTML = '';
-  clusterInfo.clusters.forEach(function(cluster, idx) {
-    var min = Math.min.apply(null, cluster.map(function(p) { return p.stance_score; }));
-    var max = Math.max.apply(null, cluster.map(function(p) { return p.stance_score; }));
-    var span = (max - min).toFixed(2);
 
-    var block = document.createElement('section');
-    block.className = 'cluster-block';
-
-    var meta = document.createElement('div');
-    meta.className = 'cluster-meta';
-    meta.textContent = 'Cluster ' + (idx + 1) + ' \u00B7 ' + cluster.length + ' persona' + (cluster.length !== 1 ? 's' : '') + ' \u00B7 span ' + span;
-    block.appendChild(meta);
-
-    var grid = document.createElement('div');
-    grid.className = 'cluster-cards';
-    cluster.forEach(function(p) {
-      grid.appendChild(buildPersonaCard(p));
-    });
-    block.appendChild(grid);
-
-    clustersContainer.appendChild(block);
+  // Sort all personas by absolute stance_score (most centrist first)
+  var sortedPersonas = data.personas.slice().sort(function(a, b) {
+    return Math.abs(a.stance_score) - Math.abs(b.stance_score);
   });
+
+  // Still show cluster info from disagreement meter
+  if (clusterInfo.clusters.length > 1) {
+    var clusterSummary = document.createElement('div');
+    clusterSummary.className = 'cluster-meta';
+    clusterSummary.textContent = clusterInfo.clusters.length + ' opinion clusters detected \u00B7 personas sorted by agreement level';
+    clustersContainer.appendChild(clusterSummary);
+  }
+
+  var grid = document.createElement('div');
+  grid.className = 'cluster-cards';
+  sortedPersonas.forEach(function(p) {
+    grid.appendChild(buildPersonaCard(p));
+  });
+  clustersContainer.appendChild(grid);
 
   // Debiaser section
   document.getElementById('debiaser-summary').textContent = data.debiaser.truth_seeking_summary || '';
