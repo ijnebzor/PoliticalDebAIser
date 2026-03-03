@@ -1335,6 +1335,62 @@ header p {
   line-height: 1.75;
 }
 
+/* ── Persona Card Expandable ── */
+
+.persona-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.persona-chevron {
+  font-size: 0.7rem;
+  color: var(--dim);
+  transition: transform 0.3s ease;
+  line-height: 1;
+}
+
+.persona-card[aria-expanded="true"] .persona-chevron {
+  transform: rotate(180deg);
+}
+
+.persona-preview {
+  font-size: 0.82rem;
+  color: var(--muted);
+  line-height: 1.75;
+  margin-bottom: 0;
+}
+
+.persona-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s ease;
+}
+
+.persona-details-inner {
+  overflow: hidden;
+  padding-top: 0.75rem;
+}
+
+.persona-card[aria-expanded="true"] .persona-details {
+  grid-template-rows: 1fr;
+}
+
+.persona-card[aria-expanded] {
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.persona-card[aria-expanded]:hover {
+  border-color: var(--border-hover);
+}
+
+.persona-card[aria-expanded]:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
 .persona-section-title {
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.62rem;

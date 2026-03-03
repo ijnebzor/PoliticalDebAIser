@@ -1,27 +1,11 @@
-use std::sync::OnceLock;
-
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Deserialize;
-use tokio::sync::Semaphore;
 
+use crate::llm::call_llm;
 use crate::models::{
     AnalysisResult, Axes2D, DebiasedSummary, FactCheck, FactCheckAssessment, PersonaId,
     PersonaOutput, SourceMeta, ToneAnalysis,
 };
-
-/// Global concurrency limiter for Ollama requests.
-/// Configured via OLLAMA_CONCURRENCY env var (default: 4).
-fn ollama_semaphore() -> &'static Semaphore {
-    static SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
-    SEMAPHORE.get_or_init(|| {
-        let concurrency: usize = std::env::var("OLLAMA_CONCURRENCY")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(4);
-        tracing::info!("Ollama concurrency limit: {concurrency}");
-        Semaphore::new(concurrency)
-    })
-}
 
 /// Persona definition with its system prompt for LLM analysis.
 struct Persona {
@@ -161,17 +145,6 @@ Core lens: ELITE CAPTURE, CORPORATE INFLUENCE, AND EQUAL APPLICATION. Rules that
 When analyzing, ask: Who really benefits? Are elites exempt from this? Is there corporate capture or revolving-door influence? Would this apply equally to a senator and a truck driver?"#,
         },
     }
-}
-
-/// Ollama API response structures.
-#[derive(Deserialize)]
-struct OllamaResponse {
-    message: OllamaMessage,
-}
-
-#[derive(Deserialize)]
-struct OllamaMessage {
-    content: String,
 }
 
 /// Parsed persona analysis from the LLM's JSON response.
@@ -566,94 +539,6 @@ fn repair_truncated_json(raw: &str) -> String {
     result
 }
 
-/// Returns true if the error is retryable (connection error or 5xx).
-fn is_retryable(status: reqwest::StatusCode) -> bool {
-    status.is_server_error()
-}
-
-/// Call the Ollama chat API with the given system prompt and user message.
-/// Retries up to 2 times on connection errors or 5xx responses (500ms delay).
-/// Respects the global concurrency limiter (OLLAMA_CONCURRENCY env var, default 4).
-pub(crate) async fn call_ollama(system_prompt: &str, user_message: &str) -> Result<String> {
-    let _permit = ollama_semaphore()
-        .acquire()
-        .await
-        .context("Failed to acquire Ollama concurrency permit")?;
-
-    let base_url =
-        std::env::var("OLLAMA_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let model = std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".to_string());
-
-    let timeout_secs: u64 = std::env::var("OLLAMA_TIMEOUT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(120);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs))
-        .build()
-        .context("Failed to build HTTP client for Ollama")?;
-    let body = serde_json::json!({
-        "model": model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt
-            },
-            {
-                "role": "user",
-                "content": user_message
-            }
-        ],
-        "stream": false
-    });
-
-    let mut last_err = None;
-
-    for attempt in 0..3 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        }
-
-        let response = match client
-            .post(format!("{base_url}/api/chat"))
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) => resp,
-            Err(e) => {
-                tracing::warn!("Ollama request failed (attempt {}): {e}", attempt + 1);
-                last_err = Some(anyhow::anyhow!("Failed to send request to Ollama: {e}"));
-                continue;
-            }
-        };
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let error_body = response.text().await.unwrap_or_default();
-            if is_retryable(status) && attempt < 2 {
-                tracing::warn!(
-                    "Ollama returned {status} (attempt {}), retrying",
-                    attempt + 1
-                );
-                last_err = Some(anyhow::anyhow!("Ollama returned {status}: {error_body}"));
-                continue;
-            }
-            anyhow::bail!("Ollama returned {status}: {error_body}");
-        }
-
-        let ollama_response: OllamaResponse = response
-            .json()
-            .await
-            .context("Failed to parse Ollama response")?;
-
-        return Ok(ollama_response.message.content);
-    }
-
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("Ollama request failed after retries")))
-}
-
 /// Parsed tone analysis from the LLM's JSON response.
 #[derive(Deserialize)]
 struct ParsedToneAnalysis {
@@ -703,7 +588,7 @@ objectivity_score: 0.0 (subjective) to 1.0 (objective)
 --- END ARTICLE ---"#
     );
 
-    let response_text = call_ollama(system_prompt, &user_message).await?;
+    let response_text = call_llm(system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
     let sanitized = sanitize_llm_json(json_text);
 
@@ -801,7 +686,7 @@ Field definitions:
 --- END ARTICLE ---"#
     );
 
-    let response_text = call_ollama(system_prompt, &user_message).await?;
+    let response_text = call_llm(system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
     let sanitized = sanitize_llm_json(json_text);
 
@@ -863,7 +748,7 @@ Respond with ONLY valid JSON in this exact format (no markdown, no code fences):
 {{
   "stance_score": 0.0,
   "confidence": 0.8,
-  "summary": "A 2-4 sentence summary from your perspective",
+  "summary": "A 2-4 sentence analysis from your unique perspective. Do NOT summarize the article — instead explain what concerns you, what you notice, and why it matters from your viewpoint",
   "key_claims": ["Claim 1", "Claim 2", "Claim 3"],
   "fact_checks": [
     {{
@@ -895,7 +780,7 @@ The "axes" object is MANDATORY. You must always include both "economic" and "soc
 --- END ARTICLE ---"#
     );
 
-    let response_text = call_ollama(persona.system_prompt, &user_message).await?;
+    let response_text = call_llm(persona.system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
     let sanitized = sanitize_llm_json(json_text);
 
@@ -1015,7 +900,16 @@ pub async fn synthesize_debiased(personas: &[PersonaOutput]) -> Result<DebiasedS
         .map(|p| {
             // Truncate summary to first 150 chars to keep prompt compact
             let short_summary = if p.summary.len() > 150 {
-                format!("{}...", &p.summary[..p.summary.char_indices().take_while(|&(i, _)| i < 150).last().map(|(i, c)| i + c.len_utf8()).unwrap_or(150)])
+                format!(
+                    "{}...",
+                    &p.summary[..p
+                        .summary
+                        .char_indices()
+                        .take_while(|&(i, _)| i < 150)
+                        .last()
+                        .map(|(i, c)| i + c.len_utf8())
+                        .unwrap_or(150)]
+                )
             } else {
                 p.summary.clone()
             };
@@ -1048,7 +942,7 @@ Perspectives:
         perspectives = perspectives.join("\n")
     );
 
-    let response_text = call_ollama(system_prompt, &user_message).await?;
+    let response_text = call_llm(system_prompt, &user_message).await?;
     let json_text = extract_json(&response_text);
     let repaired = repair_truncated_json(json_text);
     let sanitized = sanitize_llm_json(&repaired);
@@ -1174,25 +1068,6 @@ mod tests {
     fn extract_json_handles_fence_with_trailing_whitespace() {
         let input = "```json\n{\"a\": 1}\n```\n";
         assert_eq!(extract_json(input), r#"{"a": 1}"#);
-    }
-
-    #[test]
-    fn is_retryable_for_server_errors() {
-        assert!(is_retryable(reqwest::StatusCode::INTERNAL_SERVER_ERROR));
-        assert!(is_retryable(reqwest::StatusCode::BAD_GATEWAY));
-        assert!(is_retryable(reqwest::StatusCode::SERVICE_UNAVAILABLE));
-    }
-
-    #[test]
-    fn is_retryable_false_for_client_errors() {
-        assert!(!is_retryable(reqwest::StatusCode::BAD_REQUEST));
-        assert!(!is_retryable(reqwest::StatusCode::NOT_FOUND));
-        assert!(!is_retryable(reqwest::StatusCode::UNAUTHORIZED));
-    }
-
-    #[test]
-    fn is_retryable_false_for_success() {
-        assert!(!is_retryable(reqwest::StatusCode::OK));
     }
 
     // --- Persona prompt tests ---

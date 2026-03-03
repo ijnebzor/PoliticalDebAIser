@@ -65,6 +65,23 @@ function clamp(v, lo, hi) {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function getPreviewSentences(text, count) {
+  count = count || 2;
+  if (!text) return { preview: '', rest: '' };
+  var re = /[.!?](?:\s|$)/g;
+  var end = 0;
+  var found = 0;
+  var m;
+  while ((m = re.exec(text)) !== null && found < count) {
+    found++;
+    end = m.index + m[0].length;
+  }
+  if (found === 0) return { preview: text, rest: '' };
+  var preview = text.substring(0, end).trim();
+  var rest = text.substring(end).trim();
+  return { preview: preview, rest: rest };
+}
+
 // ── Normalise API Response ──
 // Converts either new (personas+debiaser) or legacy (analyses+synthesis) shape
 // into a unified internal format.
@@ -301,7 +318,7 @@ function showProgress(message) {
     } else if (progressValue < 75) {
       var name = PERSONA_NAMES[progressPersonaIdx % PERSONA_NAMES.length];
       progressText.textContent = 'Analysing as ' + name + '... (' + (progressPersonaIdx + 1) + '/8)';
-      if (progressPersonaIdx < 8) progressPersonaIdx++;
+      if (progressPersonaIdx < 7) progressPersonaIdx++;
     } else if (progressValue < 82) {
       progressText.textContent = 'Synthesising debiased summary...';
     } else {
@@ -322,6 +339,8 @@ function hideProgress() {
 
 function setLoading(on) {
   analyzeBtn.disabled = on;
+  document.getElementById('text-analyze-btn').disabled = on;
+  document.getElementById('compare-btn').disabled = on;
   if (on) {
     hideError();
     hide(resultsArea);
@@ -458,52 +477,101 @@ function buildPersonaCard(p) {
   var stanceText = (p.stance_score >= 0 ? '+' : '') + p.stance_score.toFixed(1);
 
   var icon = PERSONA_ICONS[p.id] || '\uD83D\uDC64';
+
+  // Split summary into preview (first 2 sentences) and remainder
+  var parts = getPreviewSentences(p.summary || '', 2);
+
+  var hasExpandContent = parts.rest.length > 0 ||
+    (p.key_claims && p.key_claims.length > 0) ||
+    (p.fact_checks && p.fact_checks.length > 0) ||
+    (p.caveats && p.caveats.length > 0);
+
+  if (hasExpandContent) {
+    card.setAttribute('aria-expanded', 'false');
+    card.setAttribute('tabindex', '0');
+    card.setAttribute('role', 'button');
+  }
+
   var html = '<div class="persona-card-header">' +
     '<div class="persona-title-row">' +
       '<span class="persona-icon">' + icon + '</span>' +
       '<h4 class="persona-title">' + escapeHtml(p.title) + '</h4>' +
     '</div>' +
-    '<span class="persona-badge">Score ' + stanceText + ' &middot; Conf ' + conf + '%</span>' +
+    '<div class="persona-header-right">' +
+      '<span class="persona-badge">Score ' + stanceText + ' &middot; Conf ' + conf + '%</span>' +
+      (hasExpandContent ? '<span class="persona-chevron" aria-hidden="true">&#9662;</span>' : '') +
+    '</div>' +
   '</div>' +
-  '<p class="persona-summary">' + escapeHtml(p.summary) + '</p>';
+  '<p class="persona-preview">' + escapeHtml(parts.preview) + '</p>';
 
-  // Key claims
-  if (p.key_claims && p.key_claims.length > 0) {
-    html += '<div class="persona-section-title">Key claims</div>' +
-      '<ul class="persona-claims">';
-    p.key_claims.forEach(function(c) {
-      html += '<li>' + escapeHtml(c) + '</li>';
-    });
-    html += '</ul>';
-  }
+  // Expandable details section
+  if (hasExpandContent) {
+    html += '<div class="persona-details"><div class="persona-details-inner">';
 
-  // Fact checks
-  if (p.fact_checks && p.fact_checks.length > 0) {
-    html += '<div class="persona-section-title">Fact checks</div>' +
-      '<ul class="fact-check-list">';
-    p.fact_checks.forEach(function(fc) {
-      html += '<li class="fact-check-item">' +
-        '<div class="fact-check-claim">' + escapeHtml(fc.claim) + '</div>' +
-        '<div class="fact-check-detail">' +
-          '<span class="assessment-badge ' + escapeHtml(fc.assessment) + '">' + escapeHtml(fc.assessment) + '</span> &middot; ' +
-          escapeHtml(fc.rationale) +
-        '</div>' +
-      '</li>';
-    });
-    html += '</ul>';
-  }
+    // Rest of summary (continuation after preview)
+    if (parts.rest) {
+      html += '<p class="persona-summary">' + escapeHtml(parts.rest) + '</p>';
+    }
 
-  // Caveats
-  if (p.caveats && p.caveats.length > 0) {
-    html += '<div class="persona-section-title">Caveats</div>' +
-      '<ul class="persona-caveats">';
-    p.caveats.forEach(function(c) {
-      html += '<li>' + escapeHtml(c) + '</li>';
-    });
-    html += '</ul>';
+    // Key claims
+    if (p.key_claims && p.key_claims.length > 0) {
+      html += '<div class="persona-section-title">Key claims</div>' +
+        '<ul class="persona-claims">';
+      p.key_claims.forEach(function(c) {
+        html += '<li>' + escapeHtml(c) + '</li>';
+      });
+      html += '</ul>';
+    }
+
+    // Fact checks
+    if (p.fact_checks && p.fact_checks.length > 0) {
+      html += '<div class="persona-section-title">Fact checks</div>' +
+        '<ul class="fact-check-list">';
+      p.fact_checks.forEach(function(fc) {
+        html += '<li class="fact-check-item">' +
+          '<div class="fact-check-claim">' + escapeHtml(fc.claim) + '</div>' +
+          '<div class="fact-check-detail">' +
+            '<span class="assessment-badge ' + escapeHtml(fc.assessment) + '">' + escapeHtml(fc.assessment) + '</span> &middot; ' +
+            escapeHtml(fc.rationale) +
+          '</div>' +
+        '</li>';
+      });
+      html += '</ul>';
+    }
+
+    // Caveats
+    if (p.caveats && p.caveats.length > 0) {
+      html += '<div class="persona-section-title">Caveats</div>' +
+        '<ul class="persona-caveats">';
+      p.caveats.forEach(function(c) {
+        html += '<li>' + escapeHtml(c) + '</li>';
+      });
+      html += '</ul>';
+    }
+
+    html += '</div></div>';
   }
 
   card.innerHTML = html;
+
+  // Click + keyboard handler for expand/collapse
+  if (hasExpandContent) {
+    var toggleCard = function() {
+      var expanded = card.getAttribute('aria-expanded') === 'true';
+      card.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    };
+    card.addEventListener('click', function(e) {
+      if (e.target.tagName === 'A') return;
+      toggleCard();
+    });
+    card.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCard();
+      }
+    });
+  }
+
   return card;
 }
 

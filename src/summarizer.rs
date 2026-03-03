@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::archetypes::call_ollama;
+use crate::llm::call_llm;
 
 /// Default character threshold above which articles are summarized before analysis.
 const DEFAULT_SUMMARY_THRESHOLD: usize = 4000;
@@ -57,7 +57,7 @@ pub async fn summarize_article(text: &str) -> Result<String> {
         --- BEGIN ARTICLE ---\n{text}\n--- END ARTICLE ---"
     );
 
-    call_ollama(system_prompt, &user_message).await
+    call_llm(system_prompt, &user_message).await
 }
 
 #[cfg(test)]
