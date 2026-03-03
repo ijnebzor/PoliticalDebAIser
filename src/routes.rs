@@ -36,7 +36,7 @@
 // =============================================================================
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Response};
 
 use crate::archetypes;
@@ -253,10 +253,14 @@ pub async fn list_history(State(state): State<AppState>) -> Json<Vec<HistoryList
 }
 
 /// DELETE /history/:id — remove a stored analysis.
+/// Requires bearer token authentication via CONFIG_AUTH_TOKEN env var.
 pub async fn delete_history(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
+    check_config_auth(&headers)?;
+
     let mut store = state.store.write().await;
     if store.pop(&id).is_some() {
         Ok(StatusCode::NO_CONTENT)
@@ -282,9 +286,47 @@ pub async fn get_analysis(
     })
 }
 
+/// Check bearer token authentication against CONFIG_AUTH_TOKEN env var.
+/// Returns Ok(()) if authenticated, or an ApiError if not.
+fn check_config_auth(headers: &HeaderMap) -> Result<(), ApiError> {
+    let expected = match std::env::var("CONFIG_AUTH_TOKEN") {
+        Ok(token) if !token.is_empty() => token,
+        _ => {
+            return Err(ApiError {
+                status: StatusCode::FORBIDDEN,
+                error: "Configuration locked".to_string(),
+                details: Some("CONFIG_AUTH_TOKEN is not configured on the server".to_string()),
+            });
+        }
+    };
+
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if let Some(token) = auth_header.strip_prefix("Bearer ")
+        && token == expected
+    {
+        return Ok(());
+    }
+
+    Err(ApiError {
+        status: StatusCode::UNAUTHORIZED,
+        error: "Unauthorized".to_string(),
+        details: Some("Invalid or missing bearer token".to_string()),
+    })
+}
+
 /// POST /config — store runtime LLM API keys (not persisted to disk).
 /// Only accepts known key names to prevent arbitrary data injection.
-pub async fn set_config(Json(payload): Json<ConfigRequest>) -> StatusCode {
+/// Requires bearer token authentication via CONFIG_AUTH_TOKEN env var.
+pub async fn set_config(
+    headers: HeaderMap,
+    Json(payload): Json<ConfigRequest>,
+) -> Result<StatusCode, ApiError> {
+    check_config_auth(&headers)?;
+
     let mut keys = std::collections::HashMap::new();
 
     if let Some(key) = payload.groq_api_key {
@@ -298,7 +340,7 @@ pub async fn set_config(Json(payload): Json<ConfigRequest>) -> StatusCode {
     }
 
     llm::set_runtime_keys(keys).await;
-    StatusCode::NO_CONTENT
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// GET /config — check which API keys are currently configured (no values exposed).

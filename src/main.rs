@@ -77,6 +77,11 @@ async fn main() -> anyhow::Result<()> {
             HeaderName::from_static("content-security-policy"),
             HeaderValue::from_static("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'"),
         ))
+        // HSTS: enforce HTTPS for 2 years including subdomains
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("strict-transport-security"),
+            HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+        ))
         // CORS: restrict to same-origin by default; allow configurable origins via env
         .layer(
             CorsLayer::new()
@@ -90,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
                         )),
                 )
                 .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
-                .allow_headers([axum::http::header::CONTENT_TYPE]),
+                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
         )
         .layer(TraceLayer::new_for_http());
 

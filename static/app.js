@@ -1249,8 +1249,19 @@ function saveStoredKeys(keys) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(keys));
 }
 
+function getStoredAuthToken() {
+  try {
+    return localStorage.getItem('politicaldebaiser_auth_token') || '';
+  } catch (e) { return ''; }
+}
+
+function saveStoredAuthToken(token) {
+  localStorage.setItem('politicaldebaiser_auth_token', token);
+}
+
 function openSettings() {
   var stored = getStoredKeys();
+  document.getElementById('setting-auth-token').value = getStoredAuthToken();
   document.getElementById('setting-groq-key').value = stored.groq_api_key || '';
   document.getElementById('setting-gemini-key').value = stored.gemini_api_key || '';
   document.getElementById('setting-hf-key').value = stored.hf_api_key || '';
@@ -1283,9 +1294,14 @@ function refreshConfigStatus() {
 }
 
 function syncKeysToServer(keys) {
+  var headers = { 'Content-Type': 'application/json' };
+  var token = getStoredAuthToken();
+  if (token) {
+    headers['Authorization'] = 'Bearer ' + token;
+  }
   return fetch('/config', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers,
     body: JSON.stringify(keys)
   });
 }
@@ -1295,21 +1311,26 @@ document.getElementById('settings-close').addEventListener('click', closeSetting
 settingsOverlay.addEventListener('click', closeSettings);
 
 document.getElementById('settings-save').addEventListener('click', function() {
+  saveStoredAuthToken(document.getElementById('setting-auth-token').value.trim());
   var keys = {
     groq_api_key: document.getElementById('setting-groq-key').value.trim(),
     gemini_api_key: document.getElementById('setting-gemini-key').value.trim(),
     hf_api_key: document.getElementById('setting-hf-key').value.trim()
   };
   saveStoredKeys(keys);
-  syncKeysToServer(keys).then(function() {
-    refreshConfigStatus();
+  syncKeysToServer(keys).then(function(res) {
+    if (res.status === 403) { alert('Config locked: CONFIG_AUTH_TOKEN not set on server.'); }
+    else if (res.status === 401) { alert('Unauthorized: invalid auth token.'); }
+    else { refreshConfigStatus(); }
   }).catch(function() {});
 });
 
 document.getElementById('settings-clear').addEventListener('click', function() {
+  document.getElementById('setting-auth-token').value = '';
   document.getElementById('setting-groq-key').value = '';
   document.getElementById('setting-gemini-key').value = '';
   document.getElementById('setting-hf-key').value = '';
+  saveStoredAuthToken('');
   var empty = { groq_api_key: '', gemini_api_key: '', hf_api_key: '' };
   saveStoredKeys({});
   syncKeysToServer(empty).then(function() {

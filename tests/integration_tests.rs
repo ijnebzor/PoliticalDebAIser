@@ -1,11 +1,13 @@
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{HeaderName, HeaderValue, Request, StatusCode};
 use axum::routing;
 use http_body_util::BodyExt;
+use serial_test::serial;
 use tower::ServiceExt;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 use political_debaiser::models::{AnalysisResult, DebiasedSummary, SourceMeta, ToneAnalysis};
 
@@ -577,17 +579,28 @@ async fn get_history_by_invalid_id_returns_404() {
 }
 
 #[tokio::test]
+#[serial]
 async fn delete_history_nonexistent_returns_404() {
+    // SAFETY: Tests are serialized via #[serial] to prevent env var races.
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "test-token");
+    }
+
     let response = app_with_state()
         .oneshot(
             Request::builder()
                 .method("DELETE")
                 .uri("/history/nonexistent")
+                .header("authorization", "Bearer test-token")
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = response.into_body().collect().await.unwrap().to_bytes();
@@ -655,8 +668,14 @@ async fn history_store_then_retrieve_roundtrip() {
 }
 
 #[tokio::test]
+#[serial]
 async fn history_store_then_delete_roundtrip() {
     use tower::Service;
+
+    // SAFETY: Tests are serialized via #[serial] to prevent env var races.
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "test-token");
+    }
 
     let mut app = app_with_state();
 
@@ -677,10 +696,11 @@ async fn history_store_then_delete_roundtrip() {
     let store_json: serde_json::Value = serde_json::from_slice(&store_body).unwrap();
     let id = store_json["id"].as_str().unwrap();
 
-    // Step 2: Delete it
+    // Step 2: Delete it (with auth)
     let delete_req = Request::builder()
         .method("DELETE")
         .uri(format!("/history/{id}"))
+        .header("authorization", "Bearer test-token")
         .body(Body::empty())
         .unwrap();
 
@@ -707,6 +727,10 @@ async fn history_store_then_delete_roundtrip() {
     let list_body = list_resp.into_body().collect().await.unwrap().to_bytes();
     let list_json: serde_json::Value = serde_json::from_slice(&list_body).unwrap();
     assert_eq!(list_json.as_array().unwrap().len(), 0);
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
 }
 
 #[tokio::test]
@@ -1037,4 +1061,334 @@ async fn store_history_body_includes_stage3_fields() {
     assert_eq!(response["source_meta"]["publication"], "The New York Times");
     assert_eq!(response["source_meta"]["known_bias"], "center-left");
     assert_eq!(response["source_meta"]["ownership_type"], "publicly-traded");
+}
+
+// =============================================================================
+// Stage 6 — Auth Gate Tests (POST /config)
+// =============================================================================
+
+/// Build an app with /config routes for auth gate testing.
+fn app_with_config() -> Router {
+    use political_debaiser::models::AppState;
+    use political_debaiser::routes;
+
+    let state = AppState::new(
+        political_debaiser::models::DEFAULT_CACHE_SIZE,
+        political_debaiser::models::DEFAULT_STORE_SIZE,
+    );
+
+    Router::new()
+        .route("/health", routing::get(routes::health))
+        .route(
+            "/history",
+            routing::get(routes::list_history).post(routes::store_analysis),
+        )
+        .route(
+            "/history/{id}",
+            routing::get(routes::get_analysis).delete(routes::delete_history),
+        )
+        .route(
+            "/config",
+            routing::get(routes::get_config).post(routes::set_config),
+        )
+        .with_state(state)
+        .layer(CorsLayer::permissive())
+}
+
+#[tokio::test]
+#[serial]
+async fn post_config_without_env_token_returns_403() {
+    // SAFETY: Tests are serialized via #[serial] to prevent env var races.
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/config")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"groq_api_key": "gsk_test"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "Configuration locked");
+}
+
+#[tokio::test]
+#[serial]
+async fn post_config_with_wrong_token_returns_401() {
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "correct-token");
+    }
+
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/config")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer wrong-token")
+                .body(Body::from(r#"{"groq_api_key": "gsk_test"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"], "Unauthorized");
+}
+
+#[tokio::test]
+#[serial]
+async fn post_config_with_no_auth_header_returns_401() {
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "correct-token");
+    }
+
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/config")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"groq_api_key": "gsk_test"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[serial]
+async fn post_config_with_correct_token_returns_204() {
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "correct-token");
+    }
+
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/config")
+                .header("content-type", "application/json")
+                .header("authorization", "Bearer correct-token")
+                .body(Body::from(r#"{"groq_api_key": "gsk_test"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+#[serial]
+async fn get_config_remains_public() {
+    // GET /config should work without any auth
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json.get("groq_configured").is_some());
+    assert!(json.get("gemini_configured").is_some());
+    assert!(json.get("hf_configured").is_some());
+}
+
+// =============================================================================
+// Stage 6 — Auth Gate Tests (DELETE /history/:id)
+// =============================================================================
+
+#[tokio::test]
+#[serial]
+async fn delete_history_without_env_token_returns_403() {
+    use tower::Service;
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    let mut app = app_with_state();
+
+    // Store an analysis first
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/history")
+        .header("content-type", "application/json")
+        .body(Body::from(store_history_body(
+            "https://example.com/auth-test",
+            "Auth Test",
+        )))
+        .unwrap();
+    let store_resp = app.call(store_req).await.unwrap();
+    assert_eq!(store_resp.status(), StatusCode::CREATED);
+    let store_body = store_resp.into_body().collect().await.unwrap().to_bytes();
+    let store_json: serde_json::Value = serde_json::from_slice(&store_body).unwrap();
+    let id = store_json["id"].as_str().unwrap();
+
+    // Try to delete without CONFIG_AUTH_TOKEN set
+    let delete_req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/history/{id}"))
+        .body(Body::empty())
+        .unwrap();
+    let delete_resp = app.call(delete_req).await.unwrap();
+    assert_eq!(delete_resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_history_with_wrong_token_returns_401() {
+    use tower::Service;
+
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "correct-token");
+    }
+
+    let mut app = app_with_state();
+
+    // Store an analysis first
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/history")
+        .header("content-type", "application/json")
+        .body(Body::from(store_history_body(
+            "https://example.com/auth-test-2",
+            "Auth Test 2",
+        )))
+        .unwrap();
+    let store_resp = app.call(store_req).await.unwrap();
+    assert_eq!(store_resp.status(), StatusCode::CREATED);
+    let store_body = store_resp.into_body().collect().await.unwrap().to_bytes();
+    let store_json: serde_json::Value = serde_json::from_slice(&store_body).unwrap();
+    let id = store_json["id"].as_str().unwrap();
+
+    // Try to delete with wrong token
+    let delete_req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/history/{id}"))
+        .header("authorization", "Bearer wrong-token")
+        .body(Body::empty())
+        .unwrap();
+    let delete_resp = app.call(delete_req).await.unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    assert_eq!(delete_resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[serial]
+async fn delete_history_with_correct_token_returns_204() {
+    use tower::Service;
+
+    unsafe {
+        std::env::set_var("CONFIG_AUTH_TOKEN", "correct-token");
+    }
+
+    let mut app = app_with_state();
+
+    // Store an analysis first
+    let store_req = Request::builder()
+        .method("POST")
+        .uri("/history")
+        .header("content-type", "application/json")
+        .body(Body::from(store_history_body(
+            "https://example.com/auth-test-3",
+            "Auth Test 3",
+        )))
+        .unwrap();
+    let store_resp = app.call(store_req).await.unwrap();
+    assert_eq!(store_resp.status(), StatusCode::CREATED);
+    let store_body = store_resp.into_body().collect().await.unwrap().to_bytes();
+    let store_json: serde_json::Value = serde_json::from_slice(&store_body).unwrap();
+    let id = store_json["id"].as_str().unwrap();
+
+    // Delete with correct token
+    let delete_req = Request::builder()
+        .method("DELETE")
+        .uri(format!("/history/{id}"))
+        .header("authorization", "Bearer correct-token")
+        .body(Body::empty())
+        .unwrap();
+    let delete_resp = app.call(delete_req).await.unwrap();
+
+    unsafe {
+        std::env::remove_var("CONFIG_AUTH_TOKEN");
+    }
+
+    assert_eq!(delete_resp.status(), StatusCode::NO_CONTENT);
+}
+
+// =============================================================================
+// Stage 6 — HSTS Header Test
+// =============================================================================
+
+#[tokio::test]
+async fn hsts_header_is_present_in_responses() {
+    use political_debaiser::routes;
+
+    // Build a minimal app with the HSTS header layer (mirrors main.rs)
+    let app = Router::new()
+        .route("/health", routing::get(routes::health))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("strict-transport-security"),
+            HeaderValue::from_static("max-age=63072000; includeSubDomains"),
+        ));
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let hsts = response
+        .headers()
+        .get("strict-transport-security")
+        .expect("HSTS header should be present")
+        .to_str()
+        .unwrap();
+    assert_eq!(hsts, "max-age=63072000; includeSubDomains");
 }

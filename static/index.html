@@ -297,6 +297,16 @@
     <div class="settings-body">
       <p class="settings-description">Configure LLM provider API keys. Keys are stored in your browser and sent to the server at runtime. They are not persisted on disk.</p>
       <div class="settings-field">
+        <label class="input-label" for="setting-auth-token">Auth Token</label>
+        <div class="settings-input-row">
+          <input type="password" id="setting-auth-token" class="settings-input" placeholder="Server CONFIG_AUTH_TOKEN" autocomplete="off" />
+          <button class="settings-toggle-vis" data-target="setting-auth-token" title="Show/hide">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
+          </button>
+        </div>
+        <span class="settings-status" style="font-size:0.75rem;color:var(--text-muted)">Required to save API keys or delete history</span>
+      </div>
+      <div class="settings-field">
         <label class="input-label" for="setting-groq-key">Groq API Key</label>
         <div class="settings-input-row">
           <input type="password" id="setting-groq-key" class="settings-input" placeholder="gsk_..." autocomplete="off" />
