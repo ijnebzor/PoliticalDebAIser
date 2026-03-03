@@ -1,9 +1,10 @@
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 
 // =============================================================================
 // Provider types
@@ -59,6 +60,46 @@ struct OpenAiMessage {
 }
 
 // =============================================================================
+// Runtime configuration (API keys set via POST /config)
+// =============================================================================
+
+/// Global runtime config for API keys set by the user at runtime (not persisted).
+fn runtime_config() -> &'static RwLock<HashMap<String, String>> {
+    static CONFIG: OnceLock<RwLock<HashMap<String, String>>> = OnceLock::new();
+    CONFIG.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+/// Update runtime API keys. Empty values remove the key.
+pub async fn set_runtime_keys(keys: HashMap<String, String>) {
+    let mut config = runtime_config().write().await;
+    for (key, value) in keys {
+        if value.is_empty() {
+            config.remove(&key);
+        } else {
+            config.insert(key, value);
+        }
+    }
+}
+
+/// Get current runtime API key names (values masked for security).
+pub async fn get_runtime_key_names() -> Vec<String> {
+    let config = runtime_config().read().await;
+    config.keys().cloned().collect()
+}
+
+/// Read a config value: runtime config takes precedence over env vars.
+/// Uses try_read() to avoid panicking when called from within an async runtime.
+fn resolve_config(key: &str) -> Option<String> {
+    // Check runtime config first (non-blocking try_read to avoid runtime panic)
+    if let Ok(config) = runtime_config().try_read()
+        && let Some(val) = config.get(key)
+    {
+        return Some(val.clone());
+    }
+    std::env::var(key).ok()
+}
+
+// =============================================================================
 // Provider chain configuration
 // =============================================================================
 
@@ -84,6 +125,25 @@ fn llm_semaphore() -> &'static Semaphore {
 /// Round-robin index for spreading load across providers.
 static ROUND_ROBIN_INDEX: AtomicUsize = AtomicUsize::new(0);
 
+/// Read OLLAMA_URL from env with scheme validation (http/https only).
+/// Falls back to the default if the env var is unset or has an invalid scheme.
+fn validated_ollama_url() -> String {
+    let default_url = "http://localhost:11434".to_string();
+    match std::env::var("OLLAMA_URL") {
+        Ok(url) => {
+            if url.starts_with("http://") || url.starts_with("https://") {
+                url
+            } else {
+                tracing::warn!(
+                    "OLLAMA_URL has unsupported scheme (must be http:// or https://), using default"
+                );
+                default_url
+            }
+        }
+        Err(_) => default_url,
+    }
+}
+
 /// Parse the LLM_PROVIDERS env var and build the provider chain.
 /// Defaults to `["ollama"]` if not set.
 fn provider_chain() -> Vec<ProviderConfig> {
@@ -104,14 +164,13 @@ fn provider_chain() -> Vec<ProviderConfig> {
             "ollama" => {
                 providers.push(ProviderConfig {
                     provider_type: LlmProviderType::Ollama,
-                    base_url: std::env::var("OLLAMA_URL")
-                        .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+                    base_url: validated_ollama_url(),
                     model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".to_string()),
                     api_key: None,
                 });
             }
             "groq" => {
-                if let Ok(key) = std::env::var("GROQ_API_KEY") {
+                if let Some(key) = resolve_config("GROQ_API_KEY") {
                     providers.push(ProviderConfig {
                         provider_type: LlmProviderType::Groq,
                         base_url: "https://api.groq.com/openai/v1".to_string(),
@@ -124,7 +183,7 @@ fn provider_chain() -> Vec<ProviderConfig> {
                 }
             }
             "gemini" => {
-                if let Ok(key) = std::env::var("GEMINI_API_KEY") {
+                if let Some(key) = resolve_config("GEMINI_API_KEY") {
                     providers.push(ProviderConfig {
                         provider_type: LlmProviderType::Gemini,
                         base_url: "https://generativelanguage.googleapis.com/v1beta/openai"
@@ -140,7 +199,7 @@ fn provider_chain() -> Vec<ProviderConfig> {
                 }
             }
             "huggingface" | "hf" => {
-                if let Ok(key) = std::env::var("HF_API_KEY") {
+                if let Some(key) = resolve_config("HF_API_KEY") {
                     providers.push(ProviderConfig {
                         provider_type: LlmProviderType::HuggingFace,
                         base_url: "https://router.huggingface.co/v1".to_string(),
@@ -165,8 +224,7 @@ fn provider_chain() -> Vec<ProviderConfig> {
         tracing::warn!("No LLM providers configured, falling back to Ollama");
         providers.push(ProviderConfig {
             provider_type: LlmProviderType::Ollama,
-            base_url: std::env::var("OLLAMA_URL")
-                .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+            base_url: validated_ollama_url(),
             model: std::env::var("OLLAMA_MODEL").unwrap_or_else(|_| "llama3.2".to_string()),
             api_key: None,
         });
@@ -178,6 +236,28 @@ fn provider_chain() -> Vec<ProviderConfig> {
 // =============================================================================
 // Core LLM call
 // =============================================================================
+
+/// Scrub potential API keys/secrets from error response bodies before logging.
+/// Scrubs secret patterns first (to avoid partial keys at truncation boundary),
+/// then truncates to 200 chars.
+fn scrub_error_body(body: &str) -> String {
+    use std::sync::LazyLock;
+    static SECRET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(
+            r"(?i)(Bearer\s+)\S+|(api[_-]?key\s*[=:]\s*)\S+|(key\s*[=:]\s*)\S+|(token\s*[=:]\s*)\S+|(authorization\s*[=:]\s*)(?:Bearer\s+)?\S+"
+        ).unwrap()
+    });
+
+    let scrubbed = SECRET_RE
+        .replace_all(body, "${1}${2}${3}${4}${5}[REDACTED]")
+        .to_string();
+    if scrubbed.len() > 200 {
+        let truncated: String = scrubbed.chars().take(200).collect();
+        format!("{truncated}...")
+    } else {
+        scrubbed
+    }
+}
 
 /// Returns true if the HTTP status is retryable (server error).
 fn is_retryable(status: reqwest::StatusCode) -> bool {
@@ -257,7 +337,7 @@ async fn call_provider(
 
         // Rate-limited: fail immediately to trigger fallback to next provider
         if is_rate_limited(status) {
-            let error_body = response.text().await.unwrap_or_default();
+            let error_body = scrub_error_body(&response.text().await.unwrap_or_default());
             anyhow::bail!(
                 "{:?} rate-limited (429): {error_body}",
                 provider.provider_type
@@ -265,7 +345,7 @@ async fn call_provider(
         }
 
         if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
+            let error_body = scrub_error_body(&response.text().await.unwrap_or_default());
             if is_retryable(status) && attempt < 2 {
                 tracing::warn!(
                     "{:?} returned {status} (attempt {}), retrying",
@@ -438,5 +518,60 @@ mod tests {
         assert_eq!(format!("{:?}", LlmProviderType::Groq), "Groq");
         assert_eq!(format!("{:?}", LlmProviderType::Gemini), "Gemini");
         assert_eq!(format!("{:?}", LlmProviderType::HuggingFace), "HuggingFace");
+    }
+
+    #[test]
+    fn scrub_error_body_redacts_bearer_token() {
+        let body = r#"{"error": "Invalid auth", "header": "Bearer gsk_abc123secret456"}"#;
+        let scrubbed = scrub_error_body(body);
+        assert!(!scrubbed.contains("gsk_abc123secret456"));
+        assert!(scrubbed.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_error_body_redacts_api_key_param() {
+        let body = "error: unauthorized, api_key=sk-proj-verysecretkey123 invalid";
+        let scrubbed = scrub_error_body(body);
+        assert!(!scrubbed.contains("sk-proj-verysecretkey123"));
+        assert!(scrubbed.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_error_body_redacts_key_equals() {
+        let body = "Request failed: key=AIzaSySecretGeminiKey, status=401";
+        let scrubbed = scrub_error_body(body);
+        assert!(!scrubbed.contains("AIzaSySecretGeminiKey"));
+        assert!(scrubbed.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_error_body_redacts_authorization_header() {
+        let body = "authorization: Bearer hf_ABCsecrettoken123 was rejected";
+        let scrubbed = scrub_error_body(body);
+        assert!(!scrubbed.contains("hf_ABCsecrettoken123"));
+        assert!(scrubbed.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn scrub_error_body_truncates_long_body() {
+        let body = "a]".repeat(150); // 300 chars
+        let scrubbed = scrub_error_body(&body);
+        assert!(scrubbed.len() <= 204); // 200 chars + "..."
+        assert!(scrubbed.ends_with("..."));
+    }
+
+    #[test]
+    fn scrub_error_body_preserves_safe_content() {
+        let body = "rate limit exceeded, retry after 30s";
+        let scrubbed = scrub_error_body(body);
+        assert_eq!(scrubbed, body);
+    }
+
+    #[test]
+    fn scrub_error_body_case_insensitive() {
+        let body = "BEARER my_secret_token was invalid";
+        let scrubbed = scrub_error_body(body);
+        assert!(!scrubbed.contains("my_secret_token"));
+        assert!(scrubbed.contains("[REDACTED]"));
     }
 }

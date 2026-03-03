@@ -198,6 +198,25 @@ pub struct ErrorResponse {
     pub details: Option<String>,
 }
 
+/// Request to update runtime LLM provider API keys via POST /config.
+#[derive(Debug, Deserialize)]
+pub struct ConfigRequest {
+    #[serde(default)]
+    pub groq_api_key: Option<String>,
+    #[serde(default)]
+    pub gemini_api_key: Option<String>,
+    #[serde(default)]
+    pub hf_api_key: Option<String>,
+}
+
+/// Response from GET /config showing which keys are configured.
+#[derive(Debug, Serialize)]
+pub struct ConfigResponse {
+    pub groq_configured: bool,
+    pub gemini_configured: bool,
+    pub hf_configured: bool,
+}
+
 // =============================================================================
 // Shared state (bounded LRU caches)
 // =============================================================================

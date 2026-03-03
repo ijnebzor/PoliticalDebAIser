@@ -40,10 +40,11 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Json, Response};
 
 use crate::archetypes;
+use crate::llm;
 use crate::models::{
-    AnalysisRequest, AnalysisResult, AppState, ErrorResponse, HistoryListItem, SourceMeta,
-    StoreHistoryRequest, StoreHistoryResponse, StoredAnalysis, TextAnalysisRequest,
-    generate_short_id,
+    AnalysisRequest, AnalysisResult, AppState, ConfigRequest, ConfigResponse, ErrorResponse,
+    HistoryListItem, SourceMeta, StoreHistoryRequest, StoreHistoryResponse, StoredAnalysis,
+    TextAnalysisRequest, generate_short_id,
 };
 use crate::scraper::{ScrapeError, extract_from_text, extract_source_meta, scrape_article};
 
@@ -118,8 +119,10 @@ fn analysis_err(e: anyhow::Error) -> ApiError {
     } else if msg.contains("timed out") || msg.contains("Timeout") {
         ApiError {
             status: StatusCode::GATEWAY_TIMEOUT,
-            error: "Ollama request timed out".to_string(),
-            details: Some(msg),
+            error: "Analysis request timed out".to_string(),
+            details: Some(
+                "The LLM provider did not respond in time. Please try again.".to_string(),
+            ),
         }
     } else {
         tracing::error!("Analysis error: {msg}");
@@ -276,6 +279,38 @@ pub async fn get_analysis(
         status: StatusCode::NOT_FOUND,
         error: "Analysis not found".to_string(),
         details: Some(format!("No stored analysis with ID '{id}'")),
+    })
+}
+
+/// POST /config — store runtime LLM API keys (not persisted to disk).
+/// Only accepts known key names to prevent arbitrary data injection.
+pub async fn set_config(Json(payload): Json<ConfigRequest>) -> StatusCode {
+    let mut keys = std::collections::HashMap::new();
+
+    if let Some(key) = payload.groq_api_key {
+        keys.insert("GROQ_API_KEY".to_string(), key);
+    }
+    if let Some(key) = payload.gemini_api_key {
+        keys.insert("GEMINI_API_KEY".to_string(), key);
+    }
+    if let Some(key) = payload.hf_api_key {
+        keys.insert("HF_API_KEY".to_string(), key);
+    }
+
+    llm::set_runtime_keys(keys).await;
+    StatusCode::NO_CONTENT
+}
+
+/// GET /config — check which API keys are currently configured (no values exposed).
+pub async fn get_config() -> Json<ConfigResponse> {
+    let names = llm::get_runtime_key_names().await;
+    Json(ConfigResponse {
+        groq_configured: names.contains(&"GROQ_API_KEY".to_string())
+            || std::env::var("GROQ_API_KEY").is_ok(),
+        gemini_configured: names.contains(&"GEMINI_API_KEY".to_string())
+            || std::env::var("GEMINI_API_KEY").is_ok(),
+        hf_configured: names.contains(&"HF_API_KEY".to_string())
+            || std::env::var("HF_API_KEY").is_ok(),
     })
 }
 

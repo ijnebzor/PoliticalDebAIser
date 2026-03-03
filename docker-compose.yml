@@ -32,7 +32,7 @@ services:
   ollama:
     image: ollama/ollama
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       # Persist downloaded models across container restarts
       - ollama_models:/root/.ollama

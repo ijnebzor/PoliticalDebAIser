@@ -672,14 +672,13 @@ async fn fetch_and_parse(
 }
 
 /// Try fetching an article via archive.ph as a paywall bypass.
+/// Uses the same SSRF protections (DNS pinning, redirect validation) as the primary scraper.
 async fn try_archive_ph(original_url: &str) -> Result<ArticleContent, ScrapeError> {
     let archive_url = format!("https://archive.ph/newest/{original_url}");
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| ScrapeError::FetchFailed(e.to_string()))?;
+    // SSRF protection: validate and pin the archive.ph target IP
+    let target = validate_url_target(&archive_url)?;
+    let client = build_pinned_client(&target)?;
 
     let response = client.get(&archive_url).send().await.map_err(|e| {
         if e.is_timeout() {
@@ -1579,5 +1578,122 @@ mod tests {
         let deserialized: ScrapedSourceMeta = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.publication, "The Washington Post");
         assert_eq!(deserialized.known_bias.as_deref(), Some("center-left"));
+    }
+
+    // --- SSRF protection unit tests ---
+
+    #[test]
+    fn validate_hostname_blocks_localhost() {
+        assert!(validate_hostname("localhost").is_err());
+    }
+
+    #[test]
+    fn validate_hostname_blocks_dot_local() {
+        assert!(validate_hostname("myserver.local").is_err());
+    }
+
+    #[test]
+    fn validate_hostname_blocks_dot_internal() {
+        assert!(validate_hostname("service.internal").is_err());
+    }
+
+    #[test]
+    fn validate_hostname_blocks_dot_corp() {
+        assert!(validate_hostname("intranet.corp").is_err());
+    }
+
+    #[test]
+    fn validate_hostname_blocks_metadata_google() {
+        assert!(validate_hostname("metadata.google.internal").is_err());
+    }
+
+    #[test]
+    fn validate_hostname_allows_public_domains() {
+        assert!(validate_hostname("archive.ph").is_ok());
+        assert!(validate_hostname("example.com").is_ok());
+        assert!(validate_hostname("nytimes.com").is_ok());
+    }
+
+    #[test]
+    fn is_private_ip_detects_loopback_v4() {
+        let ip: IpAddr = "127.0.0.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_10_range() {
+        let ip: IpAddr = "10.0.0.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_192_168_range() {
+        let ip: IpAddr = "192.168.1.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_172_16_range() {
+        let ip: IpAddr = "172.16.0.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_cgnat() {
+        let ip: IpAddr = "100.64.0.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_link_local() {
+        let ip: IpAddr = "169.254.1.1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_loopback_v6() {
+        let ip: IpAddr = "::1".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_detects_unspecified_v6() {
+        let ip: IpAddr = "::".parse().unwrap();
+        assert!(is_private_ip(&ip));
+    }
+
+    #[test]
+    fn is_private_ip_allows_public_ip() {
+        let ip: IpAddr = "8.8.8.8".parse().unwrap();
+        assert!(!is_private_ip(&ip));
+    }
+
+    #[test]
+    fn validate_url_target_blocks_localhost_url() {
+        let result = validate_url_target("http://localhost/secret");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_url_target_blocks_private_ip_url() {
+        let result = validate_url_target("http://127.0.0.1/admin");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_url_target_allows_archive_ph() {
+        // archive.ph should pass hostname validation (DNS may fail in CI)
+        let result = validate_url_target("https://archive.ph/newest/https://example.com");
+        // Either succeeds or fails on DNS resolution (not hostname validation)
+        match result {
+            Ok(target) => assert!(!is_private_ip(&target.ip)),
+            Err(ScrapeError::InvalidUrl(msg)) => {
+                assert!(
+                    msg.contains("resolve") || msg.contains("hostname"),
+                    "Expected DNS resolution failure, got: {msg}"
+                );
+            }
+            Err(other) => panic!("Unexpected error: {other}"),
+        }
     }
 }

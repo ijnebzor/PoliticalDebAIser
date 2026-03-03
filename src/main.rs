@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", routing::get(routes::health))
         .route("/history", routing::get(routes::list_history).post(routes::store_analysis))
         .route("/history/{id}", routing::get(routes::get_analysis).delete(routes::delete_history))
+        .route("/config", routing::get(routes::get_config).post(routes::set_config))
         .merge(rate_limited)
         .with_state(state)
         .nest_service("/static", ServeDir::new("static"))

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::llm::call_llm;
 use crate::models::{
@@ -565,6 +566,7 @@ pub async fn analyze_tone(content: &str) -> Result<ToneAnalysis> {
         and framing detection. You identify persuasion techniques, emotional manipulation, \
         and editorial bias in news writing. Be precise and evidence-based.";
 
+    let delim = Uuid::new_v4();
     let user_message = format!(
         r#"Analyze the tone and framing of this article.
 
@@ -583,9 +585,9 @@ emotional_tone: One word (e.g., "alarmist", "measured", "inflammatory", "neutral
 framing_strategy: Primary frame (e.g., "conflict frame", "human interest", "economic consequences")
 objectivity_score: 0.0 (subjective) to 1.0 (objective)
 
---- BEGIN ARTICLE ---
+--- BEGIN ARTICLE {delim} ---
 {content}
---- END ARTICLE ---"#
+--- END ARTICLE {delim} ---"#
     );
 
     let response_text = call_llm(system_prompt, &user_message).await?;
@@ -664,6 +666,7 @@ pub async fn analyze_source_credibility(
         .map(|u| format!("\nSource URL: {u}"))
         .unwrap_or_default();
 
+    let delim = Uuid::new_v4();
     let user_message = format!(
         r#"Identify the source/publication of the following article and assess its credibility.
 
@@ -681,9 +684,9 @@ Field definitions:
 - known_bias: Known editorial bias direction. One of: "left", "center-left", "center", "center-right", "right", or null if unknown. Use established media bias assessments (AllSides, Ad Fontes, MBFC).
 - ownership_type: One of: "corporate", "non-profit", "state-owned", "independent", "publicly-traded", or null if unknown.
 
---- BEGIN ARTICLE ---{url_hint}
+--- BEGIN ARTICLE {delim} ---{url_hint}
 {content}
---- END ARTICLE ---"#
+--- END ARTICLE {delim} ---"#
     );
 
     let response_text = call_llm(system_prompt, &user_message).await?;
@@ -739,6 +742,7 @@ fn fallback_parse_source_meta(raw: &str) -> Option<SourceMeta> {
 pub async fn analyze_persona(content: &str, persona_id: &PersonaId) -> Result<PersonaOutput> {
     let persona = get_persona(persona_id);
 
+    let delim = Uuid::new_v4();
     let user_message = format!(
         r#"Analyze the following article from your political perspective.
 
@@ -775,9 +779,9 @@ Field definitions:
 
 The "axes" object is MANDATORY. You must always include both "economic" and "social" values.
 
---- BEGIN ARTICLE ---
+--- BEGIN ARTICLE {delim} ---
 {content}
---- END ARTICLE ---"#
+--- END ARTICLE {delim} ---"#
     );
 
     let response_text = call_llm(persona.system_prompt, &user_message).await?;

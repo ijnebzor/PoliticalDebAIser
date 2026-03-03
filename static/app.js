@@ -1233,6 +1233,111 @@ function setHealthError() {
 checkHealth();
 setInterval(checkHealth, 30000);
 
+// ── Settings Modal ──
+
+var SETTINGS_KEY = 'politicaldebaiser_api_keys';
+var settingsModal = document.getElementById('settings-modal');
+var settingsOverlay = document.getElementById('settings-overlay');
+
+function getStoredKeys() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || {};
+  } catch (e) { return {}; }
+}
+
+function saveStoredKeys(keys) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(keys));
+}
+
+function openSettings() {
+  var stored = getStoredKeys();
+  document.getElementById('setting-groq-key').value = stored.groq_api_key || '';
+  document.getElementById('setting-gemini-key').value = stored.gemini_api_key || '';
+  document.getElementById('setting-hf-key').value = stored.hf_api_key || '';
+  settingsModal.classList.add('active');
+  settingsOverlay.classList.add('active');
+  refreshConfigStatus();
+}
+
+function closeSettings() {
+  settingsModal.classList.remove('active');
+  settingsOverlay.classList.remove('active');
+}
+
+function refreshConfigStatus() {
+  fetch('/config').then(function(res) {
+    if (!res.ok) return;
+    return res.json();
+  }).then(function(data) {
+    if (!data) return;
+    var groqStatus = document.getElementById('groq-status');
+    var geminiStatus = document.getElementById('gemini-status');
+    var hfStatus = document.getElementById('hf-status');
+    groqStatus.textContent = data.groq_configured ? 'Configured' : '';
+    groqStatus.className = 'settings-status' + (data.groq_configured ? ' configured' : '');
+    geminiStatus.textContent = data.gemini_configured ? 'Configured' : '';
+    geminiStatus.className = 'settings-status' + (data.gemini_configured ? ' configured' : '');
+    hfStatus.textContent = data.hf_configured ? 'Configured' : '';
+    hfStatus.className = 'settings-status' + (data.hf_configured ? ' configured' : '');
+  }).catch(function() {});
+}
+
+function syncKeysToServer(keys) {
+  return fetch('/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(keys)
+  });
+}
+
+document.getElementById('settings-toggle').addEventListener('click', openSettings);
+document.getElementById('settings-close').addEventListener('click', closeSettings);
+settingsOverlay.addEventListener('click', closeSettings);
+
+document.getElementById('settings-save').addEventListener('click', function() {
+  var keys = {
+    groq_api_key: document.getElementById('setting-groq-key').value.trim(),
+    gemini_api_key: document.getElementById('setting-gemini-key').value.trim(),
+    hf_api_key: document.getElementById('setting-hf-key').value.trim()
+  };
+  saveStoredKeys(keys);
+  syncKeysToServer(keys).then(function() {
+    refreshConfigStatus();
+  }).catch(function() {});
+});
+
+document.getElementById('settings-clear').addEventListener('click', function() {
+  document.getElementById('setting-groq-key').value = '';
+  document.getElementById('setting-gemini-key').value = '';
+  document.getElementById('setting-hf-key').value = '';
+  var empty = { groq_api_key: '', gemini_api_key: '', hf_api_key: '' };
+  saveStoredKeys({});
+  syncKeysToServer(empty).then(function() {
+    refreshConfigStatus();
+  }).catch(function() {});
+});
+
+// Toggle password visibility
+document.querySelectorAll('.settings-toggle-vis').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    var targetId = btn.getAttribute('data-target');
+    var input = document.getElementById(targetId);
+    if (input.type === 'password') {
+      input.type = 'text';
+    } else {
+      input.type = 'password';
+    }
+  });
+});
+
+// On page load, sync stored keys to the server
+(function() {
+  var stored = getStoredKeys();
+  if (stored.groq_api_key || stored.gemini_api_key || stored.hf_api_key) {
+    syncKeysToServer(stored).catch(function() {});
+  }
+})();
+
 // ── Init ──
 
 renderHistory();

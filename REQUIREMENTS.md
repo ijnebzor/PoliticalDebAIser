@@ -1,7 +1,7 @@
 # PoliticalDebAIser — Requirements Document
 
-**Version:** 3.1
-**Last Updated:** 2026-02-25
+**Version:** 4.0
+**Last Updated:** 2026-03-03
 **Project Lead:** Tiny Steve the Procrastinator
 **Client:** Friendji
 
@@ -45,6 +45,7 @@ The system analyzes content through 8 political persona lenses:
 - **R-024:** Fact checks per claim: claim text, assessment (supported/contested/unsupported/unclear), rationale
 - **R-025:** Caveats (list of acknowledged blind spots or biases)
 - **R-026:** Optional 2D axes: economic score (-3 to +3) and social score (-3 to +3)
+- **R-027:** Persona prompts focus on analysis of the article, not article summarization *(Stage 5)*
 
 ### 2.4 Debiaser Synthesis (replaces Synthesis)
 - **R-030:** Consensus points: areas where most/all personas agree
@@ -81,6 +82,12 @@ The system analyzes content through 8 political persona lenses:
 - **T-014:** Structured JSON output from LLM (with fence stripping fallback)
 - **T-015:** Parallel persona analysis (all 8 run concurrently)
 - **T-016:** Retry logic for transient Ollama failures (up to 2 retries)
+- **T-017:** Multi-provider LLM chain: Groq, Gemini, HuggingFace, Ollama *(Stage 5)*
+- **T-018:** Round-robin load balancing across configured providers with automatic fallback *(Stage 5)*
+- **T-019:** temperature=0 enforced for deterministic, reproducible analysis output *(Stage 5)*
+- **T-019a:** Provider selection via LLM_PROVIDERS env var (comma-separated list) *(Stage 5)*
+- **T-019b:** Per-provider API key support: GROQ_API_KEY, GEMINI_API_KEY, HF_API_KEY *(Stage 5)*
+- **T-019c:** Backward compatibility with OLLAMA_URL/OLLAMA_MODEL for Ollama-only deployments *(Stage 5)*
 
 ### 3.3 Content Scraping
 - **T-020:** Fetches article HTML via reqwest with 30s timeout
@@ -106,7 +113,7 @@ The system analyzes content through 8 political persona lenses:
 - **T-040:** Single-page application (HTML/CSS/JS, no React — vanilla JS)
 - **T-041:** Clean, light professional theme (white/gray, per prototype)
 - **T-042:** Responsive design (mobile and desktop)
-- **T-043:** 8 persona cards with persona clustering layout
+- **T-043:** 8 persona cards with persona clustering layout, expandable detail view *(Stage 5)*
 - **T-044:** Animated spectrum bar (Liberty-Order axis)
 - **T-045:** Disagreement meter with colour coding (low/medium/high)
 - **T-046:** 2D axis grid toggle (Economic vs Social)
@@ -215,16 +222,63 @@ AnalysisResult {
 ```bash
 # Required
 - Rust toolchain (cargo)
-- Ollama running locally with a model pulled
+- At least one LLM provider configured (Ollama, Groq, Gemini, or HuggingFace)
 
 # Environment variables (.env)
+
+# Provider selection (comma-separated, Stage 5)
+LLM_PROVIDERS=groq,gemini,ollama    # Providers to use (round-robin + fallback)
+
+# Per-provider API keys (Stage 5)
+GROQ_API_KEY=gsk_...                # Groq API key (free tier: 14.4K RPD)
+GEMINI_API_KEY=...                  # Google Gemini API key (free tier: 1K RPD)
+HF_API_KEY=hf_...                   # HuggingFace Inference API key
+
+# Ollama (backward compatible)
 OLLAMA_URL=http://localhost:11434    # Ollama server URL
 OLLAMA_MODEL=llama3.2               # Model to use for analysis
+
+# Summarization
+SUMMARY_THRESHOLD=4000              # Article char limit before summarization
 ```
 
 ---
 
-## 7. Change Log
+## 7. Stage 6 Scope — Production Hardening
+
+### 7.1 CI/CD & Repository
+- **S6-001:** GitHub remote repository setup
+- **S6-002:** CI/CD pipeline (build, test, lint, format check)
+- **S6-003:** Branch protection rules on main
+
+### 7.2 Production Monitoring
+- **S6-010:** Production error tracking and alerting
+- **S6-011:** Request/response logging with structured output
+- **S6-012:** Health check endpoint monitoring
+
+### 7.3 Cross-Provider Validation
+- **S6-020:** Cross-provider output consistency testing (same article, multiple providers)
+- **S6-021:** Live consistency testing with real articles across Groq/Gemini/Ollama
+- **S6-022:** Provider-specific error handling validation
+
+### 7.4 Performance Optimization
+- **S6-030:** Response time profiling and optimization
+- **S6-031:** Provider latency benchmarking
+- **S6-032:** Concurrent request load testing
+
+### 7.5 Deployment Documentation
+- **S6-040:** Production deployment guide (bare metal + Docker)
+- **S6-041:** Provider configuration guide with free tier capacity notes
+- **S6-042:** Troubleshooting and operational runbook
+
+### 7.6 Security Audit
+- **S6-050:** OWASP Top 10 2021 + 2025 security audit on llm.rs multi-provider chain
+- **S6-051:** API key handling review (no keys in logs, no keys in responses)
+- **S6-052:** SSRF re-validation for new provider endpoints
+
+---
+
+## 8. Change Log
 
 | Date | Version | Changes |
 |------|---------|---------|
@@ -233,3 +287,4 @@ OLLAMA_MODEL=llama3.2               # Model to use for analysis
 | 2026-02-17 | 2.0 | Parallel analysis, caching, Docker, frontend polish, Stage 1 features |
 | 2026-02-18 | 3.0 | Major redesign: 8 personas, stance scoring, fact-checking, 2D axes, debiaser synthesis, per Friendji prototype |
 | 2026-02-25 | 3.1 | Stage 3: Article summarization, tone/framing analysis, source credibility, 35-pub database |
+| 2026-03-03 | 4.0 | Stage 5 complete: Multi-provider LLM chain (Groq/Gemini/HF/Ollama), round-robin + fallback, temperature=0, expanded persona prompts, expandable cards UI. Stage 6 scope added. |

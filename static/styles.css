@@ -1579,7 +1579,6 @@ header p {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -1612,6 +1611,150 @@ header p {
   font-size: 0.68rem;
   color: var(--dim);
   white-space: nowrap;
+}
+
+/* ── Header Actions ── */
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── Settings Modal ── */
+
+.settings-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 200;
+}
+
+.settings-overlay.active {
+  display: block;
+}
+
+.settings-modal {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90vw;
+  max-width: 440px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  z-index: 201;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.settings-modal.active {
+  display: block;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-header h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.settings-body {
+  padding: 1rem 1.25rem;
+}
+
+.settings-description {
+  font-size: 0.82rem;
+  color: var(--dim);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.settings-field {
+  margin-bottom: 0.75rem;
+}
+
+.settings-field .input-label {
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.settings-input-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.settings-input {
+  flex: 1;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.settings-input:focus {
+  border-color: var(--cyan);
+}
+
+.settings-input::placeholder {
+  color: var(--dim);
+}
+
+.settings-toggle-vis {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s;
+}
+
+.settings-toggle-vis:hover {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.settings-status {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--dim);
+  display: block;
+  margin-top: 0.15rem;
+  min-height: 0.85rem;
+}
+
+.settings-status.configured {
+  color: var(--green);
+}
+
+.settings-footer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border);
 }
 
 /* ── Partial Results Notice ── */

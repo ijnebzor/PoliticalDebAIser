@@ -1,6 +1,23 @@
+# Build artifacts
 /target
+
+# Environment & secrets
 .env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Editor / OS
 *.swp
+*.swo
+*~
 .DS_Store
+Thumbs.db
+
+# Claude Code / tooling
 .claude/
 .project-kit/
+
+# Docker local overrides
+docker-compose.override.yml
