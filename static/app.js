@@ -139,6 +139,51 @@ function normaliseResponse(data) {
   };
 }
 
+// ── Response Validation ──
+// L2 security fix: validate analysis response shape before rendering
+
+function validateAnalysisResponse(data) {
+  if (!data || typeof data !== 'object') {
+    return 'Invalid response: expected an object';
+  }
+
+  var hasV3 = Array.isArray(data.personas) && data.debiaser && typeof data.debiaser === 'object';
+  var hasLegacy = Array.isArray(data.analyses);
+
+  if (!hasV3 && !hasLegacy) {
+    return 'Invalid response: missing personas/debiaser or analyses data';
+  }
+
+  if (hasV3) {
+    for (var i = 0; i < data.personas.length; i++) {
+      var p = data.personas[i];
+      if (!p || typeof p !== 'object') {
+        return 'Invalid persona at index ' + i + ': expected an object';
+      }
+      if (typeof p.id !== 'string' || typeof p.title !== 'string') {
+        return 'Invalid persona at index ' + i + ': missing id or title';
+      }
+      if (typeof p.stance_score !== 'number') {
+        return 'Invalid persona at index ' + i + ': missing stance_score';
+      }
+    }
+    if (typeof data.debiaser.truth_seeking_summary !== 'string') {
+      return 'Invalid debiaser: missing truth_seeking_summary';
+    }
+  }
+
+  if (hasLegacy && !hasV3) {
+    for (var j = 0; j < data.analyses.length; j++) {
+      var a = data.analyses[j];
+      if (!a || typeof a !== 'object') {
+        return 'Invalid analysis at index ' + j + ': expected an object';
+      }
+    }
+  }
+
+  return null;
+}
+
 // ── Math Utilities ──
 
 function weightedMean(items) {
@@ -652,6 +697,11 @@ function renderToneAnalysis(rawData) {
 // ── Render: Full Results ──
 
 function renderResults(rawData, sourceUrl) {
+  var validationError = validateAnalysisResponse(rawData);
+  if (validationError) {
+    showError({ title: 'Invalid analysis data', body: validationError, hint: 'The server returned an unexpected response format. Try running the analysis again.' });
+    return;
+  }
   var data = normaliseResponse(rawData);
   currentData = data;
 
@@ -879,6 +929,11 @@ function renderHistory() {
       '<button class="history-item-delete" title="Delete">&times;</button>';
 
     el.querySelector('.history-item-content').addEventListener('click', function() {
+      var check = validateAnalysisResponse(item.data);
+      if (!check.valid) {
+        showError({ title: 'Corrupted history entry', body: 'This saved analysis has an invalid data format.', hint: 'Try deleting this entry and re-analysing.' });
+        return;
+      }
       renderResults(item.data, item.url);
       closeSidebar();
       // Switch to URL tab
@@ -1046,6 +1101,12 @@ async function doAnalyze(url) {
     }
 
     var data = await res.json();
+    var check = validateAnalysisResponse(data);
+    if (!check.valid) {
+      setLoading(false);
+      showError({ title: 'Invalid response', body: 'The server returned an unexpected data format.', hint: check.reason });
+      return;
+    }
     setLoading(false);
     renderResults(data, url);
     addToHistory(data.article_title || data.title || 'Untitled', url, data);
@@ -1086,6 +1147,12 @@ document.getElementById('text-analyze-btn').addEventListener('click', async func
     }
 
     var data = await res.json();
+    var check = validateAnalysisResponse(data);
+    if (!check.valid) {
+      setLoading(false);
+      showError({ title: 'Invalid response', body: 'The server returned an unexpected data format.', hint: check.reason });
+      return;
+    }
     setLoading(false);
     renderResults(data, '');
     addToHistory(data.article_title || data.title || title, '', data);
@@ -1128,6 +1195,19 @@ document.getElementById('compare-btn').addEventListener('click', async function(
     var dataA = await resA.json();
     var dataB = await resB.json();
 
+    var checkA = validateAnalysisResponse(dataA);
+    if (!checkA.valid) {
+      setLoading(false);
+      showError({ title: 'Invalid response for Article A', body: 'The server returned an unexpected data format.', hint: checkA.reason });
+      return;
+    }
+    var checkB = validateAnalysisResponse(dataB);
+    if (!checkB.valid) {
+      setLoading(false);
+      showError({ title: 'Invalid response for Article B', body: 'The server returned an unexpected data format.', hint: checkB.reason });
+      return;
+    }
+
     setLoading(false);
     renderCompareResults(dataA, urlA, dataB, urlB);
     addToHistory(dataA.article_title || dataA.title || 'Article A', urlA, dataA);
@@ -1139,6 +1219,12 @@ document.getElementById('compare-btn').addEventListener('click', async function(
 });
 
 function renderCompareResults(rawA, urlA, rawB, urlB) {
+  var errA = validateAnalysisResponse(rawA);
+  var errB = validateAnalysisResponse(rawB);
+  if (errA || errB) {
+    showError({ title: 'Invalid analysis data', body: errA || errB, hint: 'The server returned an unexpected response format. Try running the analysis again.' });
+    return;
+  }
   var dataA = normaliseResponse(rawA);
   var dataB = normaliseResponse(rawB);
 
@@ -1194,6 +1280,11 @@ function handleHashRoute() {
   var history = getHistory();
   var entry = history.find(function(h) { return h.id === id; });
   if (entry) {
+    var check = validateAnalysisResponse(entry.data);
+    if (!check.valid) {
+      showError({ title: 'Corrupted history entry', body: 'This shared analysis has an invalid data format.', hint: 'The saved data may have been corrupted.' });
+      return;
+    }
     renderResults(entry.data, entry.url);
   }
 }
