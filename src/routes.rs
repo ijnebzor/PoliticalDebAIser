@@ -169,8 +169,12 @@ pub async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
 /// GET /metrics — basic operational statistics.
 pub async fn metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
     let uptime_secs = state.uptime_secs();
-    let total_requests = state.total_requests.load(std::sync::atomic::Ordering::Relaxed);
-    let total_analyses = state.total_analyses.load(std::sync::atomic::Ordering::Relaxed);
+    let total_requests = state
+        .total_requests
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let total_analyses = state
+        .total_analyses
+        .load(std::sync::atomic::Ordering::Relaxed);
     let history_count = state.store.read().await.len();
     let cache_count = state.cache.read().await.len();
 

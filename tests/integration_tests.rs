@@ -1419,8 +1419,14 @@ async fn health_endpoint_does_not_leak_secrets() {
 
     // Must not contain any secret-like patterns
     let forbidden = [
-        "api_key", "apikey", "secret", "password", "token",
-        "credential", "private_key", "auth",
+        "api_key",
+        "apikey",
+        "secret",
+        "password",
+        "token",
+        "credential",
+        "private_key",
+        "auth",
     ];
     for keyword in &forbidden {
         assert!(
@@ -1445,25 +1451,46 @@ async fn health_endpoint_contract_validation() {
 
     assert_eq!(response.status(), StatusCode::OK);
     let body = response.into_body().collect().await.unwrap().to_bytes();
-    let json: serde_json::Value = serde_json::from_slice(&body)
-        .expect("Health response must be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body).expect("Health response must be valid JSON");
 
     // Core contract
     assert_eq!(json["status"], "ok", "Health status must be 'ok'");
 
     // Enhanced fields — these are now required
     let version = json.get("version").expect("version field must be present");
-    assert!(version.is_string(), "version must be a string, got: {version}");
-    assert!(!version.as_str().unwrap().is_empty(), "version must not be empty");
+    assert!(
+        version.is_string(),
+        "version must be a string, got: {version}"
+    );
+    assert!(
+        !version.as_str().unwrap().is_empty(),
+        "version must not be empty"
+    );
 
-    let uptime = json.get("uptime_secs").expect("uptime_secs field must be present");
-    assert!(uptime.is_number(), "uptime_secs must be a number, got: {uptime}");
+    let uptime = json
+        .get("uptime_secs")
+        .expect("uptime_secs field must be present");
+    assert!(
+        uptime.is_number(),
+        "uptime_secs must be a number, got: {uptime}"
+    );
 
-    let history = json.get("history_count").expect("history_count field must be present");
-    assert!(history.is_number(), "history_count must be a number, got: {history}");
+    let history = json
+        .get("history_count")
+        .expect("history_count field must be present");
+    assert!(
+        history.is_number(),
+        "history_count must be a number, got: {history}"
+    );
 
-    let providers = json.get("providers").expect("providers field must be present");
-    assert!(providers.is_array(), "providers must be an array, got: {providers}");
+    let providers = json
+        .get("providers")
+        .expect("providers field must be present");
+    assert!(
+        providers.is_array(),
+        "providers must be an array, got: {providers}"
+    );
 }
 
 /// GET /metrics must return 200 with operational statistics, no secrets.
@@ -1484,7 +1511,14 @@ async fn metrics_endpoint_behavior() {
     let body_str = String::from_utf8_lossy(&body).to_lowercase();
 
     // Must not leak secrets
-    let forbidden = ["api_key", "apikey", "secret", "password", "token", "credential"];
+    let forbidden = [
+        "api_key",
+        "apikey",
+        "secret",
+        "password",
+        "token",
+        "credential",
+    ];
     for keyword in &forbidden {
         assert!(
             !body_str.contains(keyword),
@@ -1493,22 +1527,32 @@ async fn metrics_endpoint_behavior() {
     }
 
     // Validate JSON structure and required fields
-    let json: serde_json::Value = serde_json::from_slice(&body)
-        .expect("Metrics response must be valid JSON");
+    let json: serde_json::Value =
+        serde_json::from_slice(&body).expect("Metrics response must be valid JSON");
 
-    let uptime = json.get("uptime_secs").expect("uptime_secs must be present");
+    let uptime = json
+        .get("uptime_secs")
+        .expect("uptime_secs must be present");
     assert!(uptime.is_number(), "uptime_secs must be numeric");
 
-    let requests = json.get("total_requests").expect("total_requests must be present");
+    let requests = json
+        .get("total_requests")
+        .expect("total_requests must be present");
     assert!(requests.is_number(), "total_requests must be numeric");
 
-    let analyses = json.get("total_analyses").expect("total_analyses must be present");
+    let analyses = json
+        .get("total_analyses")
+        .expect("total_analyses must be present");
     assert!(analyses.is_number(), "total_analyses must be numeric");
 
-    let history = json.get("history_count").expect("history_count must be present");
+    let history = json
+        .get("history_count")
+        .expect("history_count must be present");
     assert!(history.is_number(), "history_count must be numeric");
 
-    let cache = json.get("cache_count").expect("cache_count must be present");
+    let cache = json
+        .get("cache_count")
+        .expect("cache_count must be present");
     assert!(cache.is_number(), "cache_count must be numeric");
 }
 

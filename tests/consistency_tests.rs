@@ -789,16 +789,12 @@ fn persona_id_all_order_deterministic_across_100_runs() {
 /// Verify that each PersonaId maps to the same title across 100 runs.
 #[test]
 fn persona_id_title_mapping_deterministic_across_100_runs() {
-    let first_titles: Vec<(&PersonaId, &str)> = PersonaId::all()
-        .iter()
-        .map(|id| (id, id.title()))
-        .collect();
+    let first_titles: Vec<(&PersonaId, &str)> =
+        PersonaId::all().iter().map(|id| (id, id.title())).collect();
 
     for i in 1..100 {
-        let current: Vec<(&PersonaId, &str)> = PersonaId::all()
-            .iter()
-            .map(|id| (id, id.title()))
-            .collect();
+        let current: Vec<(&PersonaId, &str)> =
+            PersonaId::all().iter().map(|id| (id, id.title())).collect();
         assert_eq!(
             current, first_titles,
             "Title mapping changed on iteration {i}"
@@ -816,11 +812,7 @@ fn persona_titles_unique_and_nonempty() {
     let mut sorted = titles.clone();
     sorted.sort();
     sorted.dedup();
-    assert_eq!(
-        sorted.len(),
-        titles.len(),
-        "Persona titles must be unique"
-    );
+    assert_eq!(sorted.len(), titles.len(), "Persona titles must be unique");
 }
 
 // =============================================================================
@@ -1027,7 +1019,10 @@ fn tone_analysis_roundtrip_preserves_serialization() {
     let roundtripped: ToneAnalysis = serde_json::from_str(&json).unwrap();
     let roundtrip_json = serde_json::to_string(&roundtripped).unwrap();
 
-    assert_eq!(roundtrip_json, json, "ToneAnalysis roundtrip changed serialization");
+    assert_eq!(
+        roundtrip_json, json,
+        "ToneAnalysis roundtrip changed serialization"
+    );
 
     // Verify field values survived roundtrip
     assert_eq!(roundtripped.rhetorical_devices.len(), 3);
@@ -1049,7 +1044,10 @@ fn tone_analysis_empty_devices_serialization_deterministic() {
     let first_json = serde_json::to_string(&tone).unwrap();
     for i in 1..20 {
         let json = serde_json::to_string(&tone).unwrap();
-        assert_eq!(json, first_json, "Empty-devices tone differs on iteration {i}");
+        assert_eq!(
+            json, first_json,
+            "Empty-devices tone differs on iteration {i}"
+        );
     }
 
     let roundtripped: ToneAnalysis = serde_json::from_str(&first_json).unwrap();
@@ -1123,7 +1121,10 @@ fn source_meta_roundtrip_preserves_all_fields() {
     assert_eq!(roundtripped.ownership_type, Some("corporate".to_string()));
 
     let roundtrip_json = serde_json::to_string(&roundtripped).unwrap();
-    assert_eq!(roundtrip_json, json, "SourceMeta roundtrip changed serialization");
+    assert_eq!(
+        roundtrip_json, json,
+        "SourceMeta roundtrip changed serialization"
+    );
 }
 
 // =============================================================================
@@ -1188,10 +1189,7 @@ fn fixture_full_analysis_result() -> AnalysisResult {
             spectrum_explain: "Weighted analysis tilts toward liberty.".to_string(),
         },
         tone_analysis: Some(ToneAnalysis {
-            rhetorical_devices: vec![
-                "appeal to fear".to_string(),
-                "loaded language".to_string(),
-            ],
+            rhetorical_devices: vec!["appeal to fear".to_string(), "loaded language".to_string()],
             emotional_tone: "alarmist".to_string(),
             framing_strategy: "conflict frame".to_string(),
             objectivity_score: 0.35,
@@ -1364,7 +1362,10 @@ fn fact_check_struct_roundtrip_deterministic() {
     // Roundtrip
     let roundtripped: Vec<FactCheck> = serde_json::from_str(&first_json).unwrap();
     let roundtrip_json = serde_json::to_string(&roundtripped).unwrap();
-    assert_eq!(roundtrip_json, first_json, "FactCheck roundtrip changed serialization");
+    assert_eq!(
+        roundtrip_json, first_json,
+        "FactCheck roundtrip changed serialization"
+    );
 }
 
 // =============================================================================
@@ -1440,16 +1441,16 @@ fn debiased_summary_serialization_roundtrip_deterministic() {
             "All perspectives agree the policy is significant".to_string(),
             "Oversight mechanisms are needed".to_string(),
         ],
-        disagreements: vec![
-            "Progressive vs hawk on liberty-order balance".to_string(),
-        ],
+        disagreements: vec!["Progressive vs hawk on liberty-order balance".to_string()],
         likely_bias_drivers: vec![
             "Security-first framing in source article".to_string(),
             "Absence of affected community voices".to_string(),
         ],
-        truth_seeking_summary: "The policy addresses real concerns but lacks proportionality safeguards.".to_string(),
+        truth_seeking_summary:
+            "The policy addresses real concerns but lacks proportionality safeguards.".to_string(),
         spectrum_score: -0.73,
-        spectrum_explain: "Weighted analysis reflects stronger liberty-oriented confidence.".to_string(),
+        spectrum_explain: "Weighted analysis reflects stronger liberty-oriented confidence."
+            .to_string(),
     };
 
     let first_json = serde_json::to_string(&summary).unwrap();
@@ -1463,7 +1464,10 @@ fn debiased_summary_serialization_roundtrip_deterministic() {
 
     let roundtripped: DebiasedSummary = serde_json::from_str(&first_json).unwrap();
     let roundtrip_json = serde_json::to_string(&roundtripped).unwrap();
-    assert_eq!(roundtrip_json, first_json, "DebiasedSummary roundtrip changed");
+    assert_eq!(
+        roundtrip_json, first_json,
+        "DebiasedSummary roundtrip changed"
+    );
 }
 
 /// Verify DebiasedSummary with empty lists serializes deterministically.
@@ -1475,7 +1479,8 @@ fn debiased_summary_empty_lists_serialization_deterministic() {
         likely_bias_drivers: vec![],
         truth_seeking_summary: "Debiased summary could not be generated.".to_string(),
         spectrum_score: 0.0,
-        spectrum_explain: "Fallback: confidence-weighted mean of persona stance scores.".to_string(),
+        spectrum_explain: "Fallback: confidence-weighted mean of persona stance scores."
+            .to_string(),
     };
 
     let first_json = serde_json::to_string(&summary).unwrap();
@@ -1660,9 +1665,7 @@ async fn edge_case_empty_text_returns_400() {
                 .method("POST")
                 .uri("/analyze-text")
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    serde_json::json!({"text": ""}).to_string(),
-                ))
+                .body(Body::from(serde_json::json!({"text": ""}).to_string()))
                 .unwrap(),
         )
         .await
@@ -1930,13 +1933,8 @@ fn edge_case_warnings_roundtrip() {
 /// Verify PersonaOutput with boundary stance/confidence values roundtrips.
 #[test]
 fn edge_case_boundary_scores_roundtrip() {
-    let boundary_values: Vec<(f64, f64)> = vec![
-        (-3.0, 0.0),
-        (3.0, 1.0),
-        (0.0, 0.5),
-        (-3.0, 1.0),
-        (3.0, 0.0),
-    ];
+    let boundary_values: Vec<(f64, f64)> =
+        vec![(-3.0, 0.0), (3.0, 1.0), (0.0, 0.5), (-3.0, 1.0), (3.0, 0.0)];
 
     for (stance, confidence) in &boundary_values {
         let output = make_persona(PersonaId::CentristTechnocrat, *stance, *confidence);

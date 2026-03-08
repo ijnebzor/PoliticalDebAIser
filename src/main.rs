@@ -37,9 +37,7 @@ async fn main() -> anyhow::Result<()> {
             .with_env_filter(env_filter)
             .init();
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(env_filter)
-            .init();
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
     let cache_size: usize = std::env::var("CACHE_SIZE")
