@@ -1,5 +1,7 @@
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use lru::LruCache;
 use rand::Rng;
@@ -237,6 +239,12 @@ pub type AnalysisStore = Arc<RwLock<LruCache<String, StoredAnalysis>>>;
 pub struct AppState {
     pub cache: ArticleCache,
     pub store: AnalysisStore,
+    /// Monotonic server start time for uptime calculation.
+    pub start_time: Arc<Instant>,
+    /// Total HTTP requests served (incremented by middleware).
+    pub total_requests: Arc<AtomicU64>,
+    /// Total analyses completed (incremented after successful /analyze or /analyze-text).
+    pub total_analyses: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -251,7 +259,25 @@ impl AppState {
                 NonZeroUsize::new(store_size)
                     .unwrap_or(NonZeroUsize::new(DEFAULT_STORE_SIZE).unwrap()),
             ))),
+            start_time: Arc::new(Instant::now()),
+            total_requests: Arc::new(AtomicU64::new(0)),
+            total_analyses: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Increment the total request counter.
+    pub fn inc_requests(&self) {
+        self.total_requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the total analyses counter.
+    pub fn inc_analyses(&self) {
+        self.total_analyses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get server uptime in seconds.
+    pub fn uptime_secs(&self) -> u64 {
+        self.start_time.elapsed().as_secs()
     }
 }
 

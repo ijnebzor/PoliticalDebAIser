@@ -14,7 +14,7 @@ tower-http = { version = "0.6", features = ["cors", "fs", "trace", "set-header",
 dotenvy = "0.15"
 anyhow = "1"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 futures = "0.3"
 url = "2"
 rand = "0.8"

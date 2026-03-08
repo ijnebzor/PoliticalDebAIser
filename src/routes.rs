@@ -137,9 +137,50 @@ fn analysis_err(e: anyhow::Error) -> ApiError {
     }
 }
 
-/// GET /health — lightweight health check for Docker and monitoring.
-pub async fn health() -> Json<serde_json::Value> {
-    Json(serde_json::json!({"status": "ok"}))
+/// GET /health — enhanced health check for Docker and monitoring.
+pub async fn health(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let uptime_secs = state.uptime_secs();
+    let history_count = state.store.read().await.len();
+
+    // Report which LLM providers are configured (names only, never values)
+    let mut providers = Vec::new();
+    if std::env::var("OLLAMA_URL").is_ok() || std::env::var("OLLAMA_MODEL").is_ok() {
+        providers.push("ollama");
+    }
+    if std::env::var("GROQ_API_KEY").is_ok() {
+        providers.push("groq");
+    }
+    if std::env::var("GEMINI_API_KEY").is_ok() {
+        providers.push("gemini");
+    }
+    if std::env::var("HF_API_KEY").is_ok() {
+        providers.push("huggingface");
+    }
+
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+        "uptime_secs": uptime_secs,
+        "history_count": history_count,
+        "providers": providers,
+    }))
+}
+
+/// GET /metrics — basic operational statistics.
+pub async fn metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let uptime_secs = state.uptime_secs();
+    let total_requests = state.total_requests.load(std::sync::atomic::Ordering::Relaxed);
+    let total_analyses = state.total_analyses.load(std::sync::atomic::Ordering::Relaxed);
+    let history_count = state.store.read().await.len();
+    let cache_count = state.cache.read().await.len();
+
+    Json(serde_json::json!({
+        "uptime_secs": uptime_secs,
+        "total_requests": total_requests,
+        "total_analyses": total_analyses,
+        "history_count": history_count,
+        "cache_count": cache_count,
+    }))
 }
 
 /// GET / — serves the main page from static/index.html (baked in at compile time).
@@ -171,12 +212,14 @@ pub async fn analyze(
         });
     }
 
+    state.inc_analyses();
     Ok(Json(result))
 }
 
 /// POST /analyze-text — accepts raw article text (no URL scraping) and runs
 /// the same analysis pipeline.
 pub async fn analyze_text(
+    State(state): State<AppState>,
     Json(payload): Json<TextAnalysisRequest>,
 ) -> Result<Json<AnalysisResult>, ApiError> {
     if payload.text.trim().is_empty() {
@@ -203,6 +246,7 @@ pub async fn analyze_text(
         .await
         .map_err(analysis_err)?;
 
+    state.inc_analyses();
     Ok(Json(result))
 }
 

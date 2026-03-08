@@ -1079,6 +1079,7 @@ fn app_with_config() -> Router {
 
     Router::new()
         .route("/health", routing::get(routes::health))
+        .route("/metrics", routing::get(routes::metrics))
         .route(
             "/history",
             routing::get(routes::list_history).post(routes::store_analysis),
@@ -1366,8 +1367,10 @@ async fn hsts_header_is_present_in_responses() {
     use political_debaiser::routes;
 
     // Build a minimal app with the HSTS header layer (mirrors main.rs)
+    let state = political_debaiser::models::AppState::new(10, 10);
     let app = Router::new()
         .route("/health", routing::get(routes::health))
+        .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static("strict-transport-security"),
             HeaderValue::from_static("max-age=63072000; includeSubDomains"),
@@ -1391,4 +1394,169 @@ async fn hsts_header_is_present_in_responses() {
         .to_str()
         .unwrap();
     assert_eq!(hsts, "max-age=63072000; includeSubDomains");
+}
+
+// =============================================================================
+// Monitoring endpoint tests (Stage 7 — CI/CD readiness)
+// =============================================================================
+
+/// Health endpoint must never expose sensitive data (API keys, secrets, tokens).
+#[tokio::test]
+async fn health_endpoint_does_not_leak_secrets() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body).to_lowercase();
+
+    // Must not contain any secret-like patterns
+    let forbidden = [
+        "api_key", "apikey", "secret", "password", "token",
+        "credential", "private_key", "auth",
+    ];
+    for keyword in &forbidden {
+        assert!(
+            !body_str.contains(keyword),
+            "Health endpoint leaked sensitive keyword: '{keyword}' in response: {body_str}"
+        );
+    }
+}
+
+/// Health endpoint must return valid JSON with enhanced monitoring fields.
+#[tokio::test]
+async fn health_endpoint_contract_validation() {
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body)
+        .expect("Health response must be valid JSON");
+
+    // Core contract
+    assert_eq!(json["status"], "ok", "Health status must be 'ok'");
+
+    // Enhanced fields — these are now required
+    let version = json.get("version").expect("version field must be present");
+    assert!(version.is_string(), "version must be a string, got: {version}");
+    assert!(!version.as_str().unwrap().is_empty(), "version must not be empty");
+
+    let uptime = json.get("uptime_secs").expect("uptime_secs field must be present");
+    assert!(uptime.is_number(), "uptime_secs must be a number, got: {uptime}");
+
+    let history = json.get("history_count").expect("history_count field must be present");
+    assert!(history.is_number(), "history_count must be a number, got: {history}");
+
+    let providers = json.get("providers").expect("providers field must be present");
+    assert!(providers.is_array(), "providers must be an array, got: {providers}");
+}
+
+/// GET /metrics must return 200 with operational statistics, no secrets.
+#[tokio::test]
+async fn metrics_endpoint_behavior() {
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let body_str = String::from_utf8_lossy(&body).to_lowercase();
+
+    // Must not leak secrets
+    let forbidden = ["api_key", "apikey", "secret", "password", "token", "credential"];
+    for keyword in &forbidden {
+        assert!(
+            !body_str.contains(keyword),
+            "Metrics endpoint leaked sensitive keyword: '{keyword}'"
+        );
+    }
+
+    // Validate JSON structure and required fields
+    let json: serde_json::Value = serde_json::from_slice(&body)
+        .expect("Metrics response must be valid JSON");
+
+    let uptime = json.get("uptime_secs").expect("uptime_secs must be present");
+    assert!(uptime.is_number(), "uptime_secs must be numeric");
+
+    let requests = json.get("total_requests").expect("total_requests must be present");
+    assert!(requests.is_number(), "total_requests must be numeric");
+
+    let analyses = json.get("total_analyses").expect("total_analyses must be present");
+    assert!(analyses.is_number(), "total_analyses must be numeric");
+
+    let history = json.get("history_count").expect("history_count must be present");
+    assert!(history.is_number(), "history_count must be numeric");
+
+    let cache = json.get("cache_count").expect("cache_count must be present");
+    assert!(cache.is_number(), "cache_count must be numeric");
+}
+
+/// Config endpoint (GET) must not expose actual API key values.
+#[tokio::test]
+async fn config_endpoint_does_not_expose_key_values() {
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Config should only contain boolean flags, never actual key values
+    if let Some(obj) = json.as_object() {
+        for (key, value) in obj {
+            assert!(
+                value.is_boolean(),
+                "Config field '{key}' must be boolean (configured/not), got: {value}"
+            );
+        }
+    }
+}
+
+/// Health endpoint must be accessible via GET only, not POST.
+#[tokio::test]
+async fn health_endpoint_rejects_post() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::METHOD_NOT_ALLOWED,
+        "POST to /health should be rejected"
+    );
 }

@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
 
+use axum::extract::State;
 use axum::http::{HeaderName, HeaderValue, Method};
+use axum::middleware::{self, Next};
 use axum::{Router, routing};
 use political_debaiser::{models, routes};
 use tower_governor::GovernorLayer;
@@ -11,15 +13,34 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
+/// Middleware that increments the total request counter.
+async fn count_requests(
+    State(state): State<models::AppState>,
+    req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> axum::response::Response {
+    state.inc_requests();
+    next.run(req).await
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Load .env if present
     let _ = dotenvy::dotenv();
 
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse()?))
-        .init();
+    // Initialize tracing — JSON format for production, human-readable for development
+    let env_filter = EnvFilter::from_default_env().add_directive("info".parse()?);
+    let log_format = std::env::var("LOG_FORMAT").unwrap_or_default();
+    if log_format == "json" {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .init();
+    }
 
     let cache_size: usize = std::env::var("CACHE_SIZE")
         .ok()
@@ -51,10 +72,12 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/", routing::get(routes::index))
         .route("/health", routing::get(routes::health))
+        .route("/metrics", routing::get(routes::metrics))
         .route("/history", routing::get(routes::list_history).post(routes::store_analysis))
         .route("/history/{id}", routing::get(routes::get_analysis).delete(routes::delete_history))
         .route("/config", routing::get(routes::get_config).post(routes::set_config))
         .merge(rate_limited)
+        .layer(middleware::from_fn_with_state(state.clone(), count_requests))
         .with_state(state)
         .nest_service("/static", ServeDir::new("static"))
         // Body size limit: 256KB max request body
