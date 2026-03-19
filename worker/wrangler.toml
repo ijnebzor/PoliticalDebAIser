@@ -1,0 +1,11 @@
+name = "political-debaiser-worker"
+main = "index.js"
+compatibility_date = "2024-01-01"
+
+# Set these in the Cloudflare dashboard under Workers → Settings → Variables
+# Never commit actual key values here
+# HOUSE_GROQ_KEY_1 = "gsk_..."
+# HOUSE_GROQ_KEY_2 = "gsk_..."
+# HOUSE_GEMINI_KEY_1 = "AIza..."
+# HOUSE_HF_KEY_1 = "hf_..."
+# ALLOWED_ORIGIN = "https://your-site.pages.dev"
