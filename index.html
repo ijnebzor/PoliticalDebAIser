@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Political DebAIser</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <div class="colour-bar"></div>
+
+  <!-- History Sidebar -->
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-header">
+      <h3>History</h3>
+      <button id="sidebar-close" class="sidebar-close" title="Close">&times;</button>
+    </div>
+    <div id="history-list" class="history-list"></div>
+    <div class="sidebar-footer">
+      <button id="clear-history" class="btn-clear-history">Clear All History</button>
+    </div>
+  </aside>
+  <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+  <div class="container">
+
+    <!-- Header -->
+    <header>
+      <div class="header-row">
+        <button id="sidebar-toggle" class="sidebar-toggle" title="History">
+          <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M1.5 3a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5z"/></svg>
+        </button>
+        <div>
+          <h1>Political DebAIser</h1>
+          <p>Paste a link or text. Personas analyse, the debiaser synthesises, and placement appears on a spectrum.</p>
+        </div>
+        <div class="header-actions">
+          <button id="settings-toggle" class="sidebar-toggle" title="API Settings">
+            <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 100 6.492 3.246 3.246 0 000-6.492zM5.754 8a2.246 2.246 0 114.492 0 2.246 2.246 0 01-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 01-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 01-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 01.52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 011.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 011.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 01.52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 01-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 01-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 002.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 001.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 00-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 00-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 00-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 00-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 001.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 002.692-1.116l.094-.318z"/></svg>
+          </button>
+          <div id="health-indicator" class="health-indicator" title="Checking worker...">
+            <span id="health-dot" class="health-dot"></span>
+            <span id="health-label" class="health-label">Checking...</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Input Tabs -->
+    <div class="input-tabs">
+      <button class="input-tab active" data-tab="url">URL</button>
+      <button class="input-tab" data-tab="text">Text</button>
+      <button class="input-tab" data-tab="compare">Compare</button>
+    </div>
+
+    <!-- URL Input -->
+    <section class="input-section">
+      <form id="analyze-form" class="input-card">
+        <div class="input-card-row">
+          <div class="input-card-field">
+            <label class="input-label">Article URL</label>
+            <input type="text" id="url-input" placeholder="https://example.com/article" autocomplete="off" required />
+          </div>
+          <button type="submit" id="analyze-btn" class="btn btn-primary">Analyse</button>
+        </div>
+      </form>
+
+      <!-- Text Input -->
+      <div id="text-input-area" class="input-card text-input-card">
+        <label class="input-label">Or paste article text</label>
+        <input type="text" id="text-title-input" class="text-title-input" placeholder="Article title (optional)" autocomplete="off" />
+        <textarea id="text-content-input" class="text-content-input" placeholder="Paste raw article text here if the URL is paywalled." rows="6"></textarea>
+        <button id="text-analyze-btn" class="btn btn-primary text-analyze-btn">Analyse Text</button>
+      </div>
+
+      <!-- Compare Mode -->
+      <div id="compare-input-area" class="input-card compare-input-card">
+        <div class="compare-inputs">
+          <div class="compare-col">
+            <label class="input-label">Article A</label>
+            <input type="text" id="compare-url-a" placeholder="https://example.com/article-a" autocomplete="off" />
+          </div>
+          <div class="compare-col">
+            <label class="input-label">Article B</label>
+            <input type="text" id="compare-url-b" placeholder="https://example.com/article-b" autocomplete="off" />
+          </div>
+        </div>
+        <button id="compare-btn" class="btn btn-primary compare-btn">Compare</button>
+      </div>
+    </section>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="error-banner">
+      <div class="error-banner-header">
+        <span class="error-banner-icon">&#9888;</span>
+        <span id="error-title" class="error-banner-title"></span>
+      </div>
+      <p id="error-body" class="error-banner-body"></p>
+      <p id="error-hint" class="error-banner-hint"></p>
+      <button id="retry-btn" class="btn-retry">Retry</button>
+    </div>
+
+    <!-- Progress Loader -->
+    <div id="progress-loader" class="progress-loader">
+      <div class="progress-bar-track">
+        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+      </div>
+      <p id="progress-text" class="progress-text">Analysing article...</p>
+    </div>
+
+    <!-- Skeleton Loading -->
+    <div id="skeleton-grid" class="skeleton-grid"></div>
+
+    <!-- ══════════════════════════════════════ -->
+    <!-- RESULTS SECTION -->
+    <!-- ══════════════════════════════════════ -->
+    <section id="results" class="results">
+
+      <!-- Article Info + Export -->
+      <article id="article-info" class="article-info-card">
+        <h2 id="article-title"></h2>
+        <a id="article-source" class="article-source" href="#" target="_blank" rel="noopener noreferrer"></a>
+        <div id="source-credibility" class="source-credibility">
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Publication:</span>
+            <span id="source-publication" class="source-cred-value"></span>
+          </div>
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Known bias:</span>
+            <span id="source-bias" class="source-cred-badge"></span>
+          </div>
+          <div class="source-credibility-row">
+            <span class="source-cred-label">Ownership:</span>
+            <span id="source-ownership" class="source-cred-value"></span>
+          </div>
+        </div>
+        <p id="article-summary-text" class="article-summary-text"></p>
+        <div id="export-buttons" class="export-buttons">
+          <button id="export-json" class="btn-export" title="Download as JSON">Export JSON</button>
+          <button id="export-text" class="btn-export" title="Download as text">Export Text</button>
+          <button id="share-link" class="btn-export" title="Copy share link">Share Link</button>
+        </div>
+      </article>
+
+      <!-- Political Spectrum Bar -->
+      <section id="spectrum-section" class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">Political spectrum</h2>
+            <p class="panel-subtitle">Single-axis placement from Liberty (&minus;3) to Order (+3), inferred from personas.</p>
+          </div>
+          <label class="toggle-label">
+            <input type="checkbox" id="show-2d" /> Show Economic vs Social axes
+          </label>
+        </div>
+        <div id="spectrum-bar" class="spectrum-bar">
+          <div class="spectrum-gradient">
+            <div id="spectrum-fill" class="spectrum-fill"></div>
+            <div id="spectrum-dot" class="spectrum-dot"></div>
+          </div>
+          <div class="spectrum-labels">
+            <span>-3</span><span>-2</span><span>-1</span><span>0</span><span>+1</span><span>+2</span><span>+3</span>
+          </div>
+          <p id="spectrum-value" class="spectrum-value"></p>
+        </div>
+        <div id="disagreement-meter" class="disagreement-meter">
+          <div class="meter-row">
+            <span class="meter-label">Disagreement meter:</span>
+            <div class="meter-track"><div id="meter-fill" class="meter-fill"></div></div>
+            <span id="meter-stdev" class="meter-stdev"></span>
+          </div>
+          <p id="meter-clusters" class="meter-clusters"></p>
+        </div>
+      </section>
+
+      <!-- Tone & Framing Analysis -->
+      <section id="tone-section" class="panel tone-section">
+        <h3 class="panel-title">Tone &amp; framing analysis</h3>
+        <div class="tone-grid">
+          <div class="tone-objectivity">
+            <span class="tone-obj-label">Objectivity</span>
+            <div class="tone-obj-track"><div id="tone-obj-fill" class="tone-obj-fill"></div></div>
+            <span id="tone-obj-value" class="tone-obj-value"></span>
+          </div>
+          <div class="tone-meta">
+            <div class="tone-meta-row">
+              <span class="tone-meta-label">Emotional tone:</span>
+              <span id="tone-emotional" class="tone-badge"></span>
+            </div>
+            <div class="tone-meta-row">
+              <span class="tone-meta-label">Framing strategy:</span>
+              <span id="tone-framing" class="tone-framing-value"></span>
+            </div>
+          </div>
+        </div>
+        <div class="tone-devices">
+          <span class="tone-devices-label">Rhetorical devices:</span>
+          <div id="tone-devices-list" class="tone-devices-list"></div>
+        </div>
+      </section>
+
+      <!-- 2D Axis Grid -->
+      <section id="axis-grid-section" class="panel axis-grid-section">
+        <div class="panel-header">
+          <h3 class="panel-title">Economic vs Social axes</h3>
+          <div id="axes-legend" class="axes-legend">
+            <span class="legend-tag">Economic: &minus;3 more intervention &larr;&rarr; +3 more market</span>
+            <span class="legend-tag">Social: &minus;3 more libertarian &larr;&rarr; +3 more authoritarian</span>
+            <span class="legend-colour-scale">
+              <span id="legend-dot-lo" class="legend-dot"></span> to
+              <span id="legend-dot-hi" class="legend-dot"></span> colour scale
+            </span>
+          </div>
+        </div>
+        <div id="axis-grid" class="axis-grid">
+          <div class="axis-label axis-label-x">Economic (&minus;3 &larr;&rarr; +3)</div>
+          <div class="axis-label axis-label-y">Social (&minus;3 &larr;&rarr; +3)</div>
+        </div>
+      </section>
+
+      <!-- Partial Results Notice -->
+      <div id="partial-notice" class="partial-notice"></div>
+
+      <!-- Persona Clusters -->
+      <div id="persona-clusters"></div>
+
+      <!-- Debiaser Section -->
+      <section id="debiaser-section" class="panel debiaser-section">
+        <h3 class="panel-title">Truth-seeking summary</h3>
+        <p id="debiaser-summary" class="debiaser-summary"></p>
+        <div class="debiaser-grid">
+          <div class="list-card">
+            <h5 class="list-card-title">Consensus</h5>
+            <ul id="debiaser-consensus" class="list-card-items"></ul>
+          </div>
+          <div class="list-card">
+            <h5 class="list-card-title">Disagreements</h5>
+            <ul id="debiaser-disagreements" class="list-card-items"></ul>
+          </div>
+          <div class="list-card">
+            <h5 class="list-card-title">Likely bias drivers</h5>
+            <ul id="debiaser-bias" class="list-card-items"></ul>
+          </div>
+        </div>
+      </section>
+
+    </section>
+
+    <!-- Compare Results -->
+    <section id="compare-results" class="compare-results">
+      <div class="compare-columns">
+        <div class="compare-result-col" id="compare-col-a"></div>
+        <div class="compare-result-col" id="compare-col-b"></div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      Political DebAIser &mdash; See every side of the story.
+    </footer>
+
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-overlay" class="settings-overlay"></div>
+  <div id="settings-modal" class="settings-modal">
+    <div class="settings-header">
+      <h3>API Settings</h3>
+      <button id="settings-close" class="sidebar-close" title="Close">&times;</button>
+    </div>
+    <div class="settings-body">
+      <p class="settings-description">Optionally add your own API keys to use your quota. If left blank, house keys are used automatically as fallback. Keys are stored in your browser only.</p>
+      <div class="settings-field">
+        <label class="input-label" for="setting-groq-key">Groq API Key <span style="font-weight:400;opacity:0.6">(free tier available)</span></label>
+        <div class="settings-input-row">
+          <input type="password" id="setting-groq-key" class="settings-input" placeholder="gsk_..." autocomplete="off" />
+          <button class="settings-toggle-vis" data-target="setting-groq-key" title="Show/hide">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
+          </button>
+        </div>
+        <span id="groq-status" class="settings-status"></span>
+      </div>
+      <div class="settings-field">
+        <label class="input-label" for="setting-gemini-key">Gemini API Key <span style="font-weight:400;opacity:0.6">(free tier available)</span></label>
+        <div class="settings-input-row">
+          <input type="password" id="setting-gemini-key" class="settings-input" placeholder="AIza..." autocomplete="off" />
+          <button class="settings-toggle-vis" data-target="setting-gemini-key" title="Show/hide">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
+          </button>
+        </div>
+        <span id="gemini-status" class="settings-status"></span>
+      </div>
+      <div class="settings-field">
+        <label class="input-label" for="setting-hf-key">HuggingFace API Key</label>
+        <div class="settings-input-row">
+          <input type="password" id="setting-hf-key" class="settings-input" placeholder="hf_..." autocomplete="off" />
+          <button class="settings-toggle-vis" data-target="setting-hf-key" title="Show/hide">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
+          </button>
+        </div>
+        <span id="hf-status" class="settings-status"></span>
+      </div>
+    </div>
+    <div class="settings-footer">
+      <button id="settings-save" class="btn btn-primary">Save Keys</button>
+      <button id="settings-clear" class="btn-clear-history">Clear All Keys</button>
+    </div>
+  </div>
+
+  <div class="colour-bar"></div>
+
+  <!--
+    ╔══════════════════════════════════════════════════════════════════╗
+    ║  CONFIGURATION — set your Cloudflare Worker URL here            ║
+    ║  After deploying the worker, replace the URL below              ║
+    ╚══════════════════════════════════════════════════════════════════╝
+  -->
+  <script>
+    window.WORKER_URL = 'https://political-debaiser-worker.YOUR_SUBDOMAIN.workers.dev';
+  </script>
+
+  <script src="engine.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
