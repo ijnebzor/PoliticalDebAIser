@@ -35,16 +35,21 @@
 //
 // =============================================================================
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::time::Instant;
+
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Json, Response};
+use serde::Deserialize;
 
 use crate::archetypes;
 use crate::llm;
 use crate::models::{
-    AnalysisRequest, AnalysisResult, AppState, ConfigRequest, ConfigResponse, ErrorResponse,
-    HistoryListItem, SourceMeta, StoreHistoryRequest, StoreHistoryResponse, StoredAnalysis,
-    TextAnalysisRequest, generate_short_id,
+    AnalysisRequest, AnalysisResult, AppState, CachedAnalysis, ConfigRequest, ConfigResponse,
+    ErrorResponse, HistoryListItem, SourceMeta, StoreHistoryRequest, StoreHistoryResponse,
+    StoredAnalysis, TextAnalysisRequest, generate_short_id,
 };
 use crate::scraper::{ScrapeError, extract_from_text, extract_source_meta, scrape_article};
 
@@ -175,15 +180,23 @@ pub async fn metrics(State(state): State<AppState>) -> Json<serde_json::Value> {
     let total_analyses = state
         .total_analyses
         .load(std::sync::atomic::Ordering::Relaxed);
+    let cache_hit_count = state.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+    let cache_miss_count = state
+        .cache_misses
+        .load(std::sync::atomic::Ordering::Relaxed);
     let history_count = state.store.read().await.len();
     let cache_count = state.cache.read().await.len();
+    let response_cache_count = state.response_cache.read().await.len();
 
     Json(serde_json::json!({
         "uptime_secs": uptime_secs,
         "total_requests": total_requests,
         "total_analyses": total_analyses,
+        "cache_hit_count": cache_hit_count,
+        "cache_miss_count": cache_miss_count,
         "history_count": history_count,
         "cache_count": cache_count,
+        "response_cache_count": response_cache_count,
     }))
 }
 
@@ -192,19 +205,58 @@ pub async fn index() -> Html<&'static str> {
     Html(include_str!("../static/index.html"))
 }
 
+/// Compute a stable hash key for a URL (used for response caching).
+fn url_cache_key(url: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
 /// POST /analyze — accepts a URL and returns multi-perspective analysis.
+/// Caches results by URL hash; returns cached result if within TTL.
 pub async fn analyze(
     State(state): State<AppState>,
     Json(payload): Json<AnalysisRequest>,
-) -> Result<Json<AnalysisResult>, ApiError> {
+) -> Result<Response, ApiError> {
+    let cache_key = url_cache_key(&payload.url);
+
+    // Check response cache
+    {
+        let mut cache = state.response_cache.write().await;
+        if let Some(cached) = cache.get(&cache_key)
+            && cached.cached_at.elapsed().as_secs() < state.cache_ttl_secs
+        {
+            state.inc_cache_hits();
+            let mut response = Json(cached.result.clone()).into_response();
+            response.headers_mut().insert(
+                HeaderName::from_static("x-cache"),
+                HeaderValue::from_static("HIT"),
+            );
+            return Ok(response);
+        }
+    }
+
+    state.inc_cache_misses();
+
     let article = scrape_article(&payload.url, &state.cache)
         .await
         .map_err(scrape_err)?;
 
-    let mut result =
-        archetypes::analyze_full(&article.body_text, &article.title, Some(&payload.url))
-            .await
-            .map_err(analysis_err)?;
+    let timeout_duration = std::time::Duration::from_secs(state.request_timeout_secs);
+    let analysis_future =
+        archetypes::analyze_full(&article.body_text, &article.title, Some(&payload.url));
+
+    let mut result = tokio::time::timeout(timeout_duration, analysis_future)
+        .await
+        .map_err(|_| ApiError {
+            status: StatusCode::GATEWAY_TIMEOUT,
+            error: "Analysis request timed out".to_string(),
+            details: Some(format!(
+                "LLM analysis did not complete within {}s",
+                state.request_timeout_secs
+            )),
+        })?
+        .map_err(analysis_err)?;
 
     // If LLM-based source credibility failed, fall back to domain-based metadata
     if result.source_meta.is_none() {
@@ -216,8 +268,26 @@ pub async fn analyze(
         });
     }
 
+    // Store in response cache
+    {
+        let mut cache = state.response_cache.write().await;
+        cache.put(
+            cache_key,
+            CachedAnalysis {
+                result: result.clone(),
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
     state.inc_analyses();
-    Ok(Json(result))
+
+    let mut response = Json(result).into_response();
+    response.headers_mut().insert(
+        HeaderName::from_static("x-cache"),
+        HeaderValue::from_static("MISS"),
+    );
+    Ok(response)
 }
 
 /// POST /analyze-text — accepts raw article text (no URL scraping) and runs
@@ -246,8 +316,19 @@ pub async fn analyze_text(
 
     let article = extract_from_text(&payload.text, payload.title.as_deref());
 
-    let result = archetypes::analyze_full(&article.body_text, &article.title, None)
+    let timeout_duration = std::time::Duration::from_secs(state.request_timeout_secs);
+    let analysis_future = archetypes::analyze_full(&article.body_text, &article.title, None);
+
+    let result = tokio::time::timeout(timeout_duration, analysis_future)
         .await
+        .map_err(|_| ApiError {
+            status: StatusCode::GATEWAY_TIMEOUT,
+            error: "Analysis request timed out".to_string(),
+            details: Some(format!(
+                "LLM analysis did not complete within {}s",
+                state.request_timeout_secs
+            )),
+        })?
         .map_err(analysis_err)?;
 
     state.inc_analyses();
@@ -296,6 +377,34 @@ pub async fn list_history(State(state): State<AppState>) -> Json<Vec<HistoryList
         })
         .collect();
     // Sort by created_at descending (newest first)
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Json(items)
+}
+
+/// Query parameters for history search.
+#[derive(Deserialize)]
+pub struct HistorySearchQuery {
+    #[serde(default)]
+    pub q: String,
+}
+
+/// GET /history/search?q=<query> — search history entries by title (case-insensitive substring).
+pub async fn search_history(
+    State(state): State<AppState>,
+    Query(params): Query<HistorySearchQuery>,
+) -> Json<Vec<HistoryListItem>> {
+    let store = state.store.read().await;
+    let query = params.q.to_lowercase();
+    let mut items: Vec<HistoryListItem> = store
+        .iter()
+        .filter(|(_, s)| query.is_empty() || s.response.title.to_lowercase().contains(&query))
+        .map(|(_, s)| HistoryListItem {
+            id: s.id.clone(),
+            article_title: s.response.title.clone(),
+            source_url: s.source_url.clone(),
+            created_at: s.created_at.clone(),
+        })
+        .collect();
     items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     Json(items)
 }

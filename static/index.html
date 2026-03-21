@@ -4,6 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Political DebAIser</title>
+  <meta name="description" content="Multi-perspective political news analysis. 8 AI personas analyse articles from different viewpoints, then a debiaser synthesises a balanced summary." />
+  <meta name="theme-color" content="#00d4ff" />
+  <meta property="og:title" content="Political DebAIser" />
+  <meta property="og:description" content="Multi-perspective political news analysis. 8 AI personas analyse articles from different viewpoints, then a debiaser synthesises a balanced summary." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text x='4' y='26' font-size='28' font-weight='700' font-family='sans-serif' fill='%2300d4ff'>D</text></svg>" />
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -14,11 +21,11 @@
   <aside id="sidebar" class="sidebar">
     <div class="sidebar-header">
       <h3>History</h3>
-      <button id="sidebar-close" class="sidebar-close" title="Close">&times;</button>
+      <button id="sidebar-close" class="sidebar-close" title="Close" aria-label="Close history sidebar">&times;</button>
     </div>
     <div id="history-list" class="history-list"></div>
     <div class="sidebar-footer">
-      <button id="clear-history" class="btn-clear-history">Clear All History</button>
+      <button id="clear-history" class="btn-clear-history" aria-label="Clear all analysis history">Clear All History</button>
     </div>
   </aside>
   <div id="sidebar-overlay" class="sidebar-overlay"></div>
@@ -28,7 +35,7 @@
     <!-- Header -->
     <header>
       <div class="header-row">
-        <button id="sidebar-toggle" class="sidebar-toggle" title="History">
+        <button id="sidebar-toggle" class="sidebar-toggle" title="History" aria-label="Open history sidebar">
           <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M1.5 3a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5zm0 5a.5.5 0 01.5-.5h12a.5.5 0 010 1H2a.5.5 0 01-.5-.5z"/></svg>
         </button>
         <div>
@@ -36,7 +43,7 @@
           <p>Paste a link or text. Personas analyse, the debiaser synthesises, and placement appears on a spectrum.</p>
         </div>
         <div class="header-actions">
-          <button id="settings-toggle" class="sidebar-toggle" title="API Settings">
+          <button id="settings-toggle" class="sidebar-toggle" title="API Settings" aria-label="Open API settings">
             <svg viewBox="0 0 16 16" width="20" height="20" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 100 6.492 3.246 3.246 0 000-6.492zM5.754 8a2.246 2.246 0 114.492 0 2.246 2.246 0 01-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 01-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 01-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 01.52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 011.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 011.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 01.52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 01-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 01-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 002.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 001.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 00-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 00-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 00-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 00-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 001.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 002.692-1.116l.094-.318z"/></svg>
           </button>
           <div id="health-indicator" class="health-indicator" title="Checking server...">
@@ -108,7 +115,7 @@
     </section>
 
     <!-- Error Banner -->
-    <div id="error-banner" class="error-banner">
+    <div id="error-banner" class="error-banner" role="alert">
       <div class="error-banner-header">
         <span class="error-banner-icon">&#9888;</span>
         <span id="error-title" class="error-banner-title"></span>
@@ -292,7 +299,7 @@
   <div id="settings-modal" class="settings-modal">
     <div class="settings-header">
       <h3>API Settings</h3>
-      <button id="settings-close" class="sidebar-close" title="Close">&times;</button>
+      <button id="settings-close" class="sidebar-close" title="Close" aria-label="Close settings">&times;</button>
     </div>
     <div class="settings-body">
       <p class="settings-description">Configure LLM provider API keys. Keys are stored in your browser and sent to the server at runtime. They are not persisted on disk.</p>
@@ -300,7 +307,7 @@
         <label class="input-label" for="setting-auth-token">Auth Token</label>
         <div class="settings-input-row">
           <input type="password" id="setting-auth-token" class="settings-input" placeholder="Server CONFIG_AUTH_TOKEN" autocomplete="off" />
-          <button class="settings-toggle-vis" data-target="setting-auth-token" title="Show/hide">
+          <button class="settings-toggle-vis" data-target="setting-auth-token" title="Show/hide" aria-label="Toggle password visibility">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
           </button>
         </div>
@@ -310,7 +317,7 @@
         <label class="input-label" for="setting-groq-key">Groq API Key</label>
         <div class="settings-input-row">
           <input type="password" id="setting-groq-key" class="settings-input" placeholder="gsk_..." autocomplete="off" />
-          <button class="settings-toggle-vis" data-target="setting-groq-key" title="Show/hide">
+          <button class="settings-toggle-vis" data-target="setting-groq-key" title="Show/hide" aria-label="Toggle password visibility">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
           </button>
         </div>
@@ -320,7 +327,7 @@
         <label class="input-label" for="setting-gemini-key">Gemini API Key</label>
         <div class="settings-input-row">
           <input type="password" id="setting-gemini-key" class="settings-input" placeholder="AIza..." autocomplete="off" />
-          <button class="settings-toggle-vis" data-target="setting-gemini-key" title="Show/hide">
+          <button class="settings-toggle-vis" data-target="setting-gemini-key" title="Show/hide" aria-label="Toggle password visibility">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
           </button>
         </div>
@@ -330,7 +337,7 @@
         <label class="input-label" for="setting-hf-key">HuggingFace API Key</label>
         <div class="settings-input-row">
           <input type="password" id="setting-hf-key" class="settings-input" placeholder="hf_..." autocomplete="off" />
-          <button class="settings-toggle-vis" data-target="setting-hf-key" title="Show/hide">
+          <button class="settings-toggle-vis" data-target="setting-hf-key" title="Show/hide" aria-label="Toggle password visibility">
             <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 2c-3.5 0-6.4 2.2-7.7 5.3a.5.5 0 000 .4C1.6 10.8 4.5 13 8 13s6.4-2.2 7.7-5.3a.5.5 0 000-.4C14.4 4.2 11.5 2 8 2zm0 9.5A3.5 3.5 0 118 5a3.5 3.5 0 010 7zm0-5.5a2 2 0 100 4 2 2 0 000-4z"/></svg>
           </button>
         </div>

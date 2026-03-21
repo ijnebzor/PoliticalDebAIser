@@ -1,5 +1,20 @@
 # PoliticalDebAIser — Docker Compose
 # Runs the web app alongside a local Ollama instance for LLM inference.
+#
+# Usage:
+#   Development:  docker compose up
+#   Production:   docker compose --profile production up -d
+#
+# Environment variables (set in .env or export):
+#   OLLAMA_MODEL   — Ollama model name (default: llama3.2)
+#   RUST_LOG       — Log level: trace|debug|info|warn|error (default: info)
+#   LOG_FORMAT     — Log output format: text|json (default: text)
+#   CORS_ORIGIN    — Allowed CORS origin (default: http://localhost:3000)
+#   LLM_PROVIDERS  — Comma-separated provider list, e.g. "groq,gemini,ollama"
+#   GROQ_API_KEY   — API key for Groq provider (if using groq in LLM_PROVIDERS)
+#   GEMINI_API_KEY — API key for Gemini provider (if using gemini in LLM_PROVIDERS)
+#   HF_API_KEY     — API key for HuggingFace provider (if using hf in LLM_PROVIDERS)
+#   CONFIG_AUTH_TOKEN — Bearer token for /config and /history DELETE endpoints
 
 services:
   # --------------------------------------------------------------------------
@@ -14,6 +29,7 @@ services:
       OLLAMA_URL: http://ollama:11434
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
       RUST_LOG: ${RUST_LOG:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
@@ -25,6 +41,50 @@ services:
       ollama:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+        reservations:
+          memory: 128M
+          cpus: "0.25"
+
+  # --------------------------------------------------------------------------
+  # app-production: production-tuned app with stricter settings
+  # --------------------------------------------------------------------------
+  app-production:
+    build: .
+    profiles:
+      - production
+    ports:
+      - "3000:3000"
+    environment:
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      RUST_LOG: ${RUST_LOG:-warn}
+      LOG_FORMAT: json
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-ollama}
+      CONFIG_AUTH_TOKEN: ${CONFIG_AUTH_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "2.0"
+        reservations:
+          memory: 256M
+          cpus: "0.5"
 
   # --------------------------------------------------------------------------
   # ollama: local LLM inference server
@@ -43,6 +103,14 @@ services:
       retries: 5
       start_period: 15s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "4.0"
+        reservations:
+          memory: 1G
+          cpus: "1.0"
 
 volumes:
   ollama_models:

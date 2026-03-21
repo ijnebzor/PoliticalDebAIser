@@ -7,6 +7,7 @@ use axum::{Router, routing};
 use political_debaiser::{models, routes};
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -52,19 +53,33 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("Article cache size: {cache_size}, history store size: {store_size}");
     let state = models::AppState::new(cache_size, store_size);
 
-    // Rate limiting: 5 requests/minute per IP on analysis endpoints
-    // per_second(12) = 1 token replenished every 12s; burst_size(5) = up to 5 rapid requests
-    let rate_limit_conf = GovernorConfigBuilder::default()
-        .per_second(12)
-        .burst_size(5)
+    // Rate limiting: configurable via RATE_LIMIT_RPM (default 60 requests/minute per IP)
+    let rpm: u64 = std::env::var("RATE_LIMIT_RPM")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60);
+    let interval_ms = 60_000 / rpm.max(1);
+    let burst = (rpm / 6).max(1) as u32;
+    tracing::info!("Rate limit: {rpm} RPM per IP (interval={interval_ms}ms, burst={burst})");
+
+    let global_rate_conf = GovernorConfigBuilder::default()
+        .per_millisecond(interval_ms)
+        .burst_size(burst)
         .finish()
         .expect("valid rate limit config");
 
-    // Analysis endpoints with rate limiting
+    // Stricter rate limit on analysis endpoints: 5 requests/minute per IP
+    let analysis_rate_conf = GovernorConfigBuilder::default()
+        .per_second(12)
+        .burst_size(5)
+        .finish()
+        .expect("valid analysis rate limit config");
+
+    // Analysis endpoints with strict rate limiting
     let rate_limited = Router::new()
         .route("/analyze", routing::post(routes::analyze))
         .route("/analyze-text", routing::post(routes::analyze_text))
-        .layer(GovernorLayer::new(rate_limit_conf));
+        .layer(GovernorLayer::new(analysis_rate_conf));
 
     // All other routes — no rate limiting
     let app = Router::new()
@@ -72,6 +87,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", routing::get(routes::health))
         .route("/metrics", routing::get(routes::metrics))
         .route("/history", routing::get(routes::list_history).post(routes::store_analysis))
+        .route("/history/search", routing::get(routes::search_history))
         .route("/history/{id}", routing::get(routes::get_analysis).delete(routes::delete_history))
         .route("/config", routing::get(routes::get_config).post(routes::set_config))
         .merge(rate_limited)
@@ -118,7 +134,11 @@ async fn main() -> anyhow::Result<()> {
                 .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
                 .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]),
         )
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        // Response compression: gzip + brotli
+        .layer(CompressionLayer::new().gzip(true).br(true))
+        // Global per-IP rate limiting
+        .layer(GovernorLayer::new(global_rate_conf));
 
     let addr = "0.0.0.0:3000";
     tracing::info!("PoliticalDebAIser listening on {addr}");

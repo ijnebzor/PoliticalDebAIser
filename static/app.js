@@ -910,10 +910,78 @@ function clearHistory() {
   renderHistory();
 }
 
+// ── History Search & Sort ──
+
+var historySearchQuery = '';
+var historySortOrder = 'newest'; // 'newest' | 'oldest'
+var historySearchTimer = null;
+
+function ensureHistoryControls() {
+  if (document.getElementById('history-search-input')) return;
+
+  var controls = document.createElement('div');
+  controls.className = 'history-controls';
+  controls.style.cssText = 'padding: 8px 12px; display: flex; flex-direction: column; gap: 6px;';
+
+  var searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.id = 'history-search-input';
+  searchInput.placeholder = 'Search history\u2026';
+  searchInput.style.cssText = 'width: 100%; padding: 6px 10px; border: 1px solid var(--border, #1a1a1a); border-radius: 6px; background: var(--bg, #000); color: var(--text, #e8e8e8); font-size: 13px; outline: none; box-sizing: border-box;';
+
+  searchInput.addEventListener('keyup', function() {
+    clearTimeout(historySearchTimer);
+    historySearchTimer = setTimeout(function() {
+      historySearchQuery = searchInput.value;
+      renderHistory();
+    }, 300);
+  });
+
+  var sortSelect = document.createElement('select');
+  sortSelect.id = 'history-sort-select';
+  sortSelect.style.cssText = 'width: 100%; padding: 6px 10px; border: 1px solid var(--border, #1a1a1a); border-radius: 6px; background: var(--bg, #000); color: var(--text, #e8e8e8); font-size: 13px; outline: none; box-sizing: border-box;';
+
+  var optNewest = document.createElement('option');
+  optNewest.value = 'newest';
+  optNewest.textContent = 'Newest first';
+  var optOldest = document.createElement('option');
+  optOldest.value = 'oldest';
+  optOldest.textContent = 'Oldest first';
+  sortSelect.appendChild(optNewest);
+  sortSelect.appendChild(optOldest);
+  sortSelect.value = historySortOrder;
+
+  sortSelect.addEventListener('change', function() {
+    historySortOrder = sortSelect.value;
+    renderHistory();
+  });
+
+  controls.appendChild(searchInput);
+  controls.appendChild(sortSelect);
+  historyList.parentNode.insertBefore(controls, historyList);
+}
+
 function renderHistory() {
+  ensureHistoryControls();
   var history = getHistory();
+
+  // Filter by search query
+  if (historySearchQuery) {
+    var q = historySearchQuery.toLowerCase();
+    history = history.filter(function(item) {
+      return (item.title || '').toLowerCase().indexOf(q) !== -1;
+    });
+  }
+
+  // Sort
+  history.sort(function(a, b) {
+    var ta = a.timestamp || 0;
+    var tb = b.timestamp || 0;
+    return historySortOrder === 'oldest' ? ta - tb : tb - ta;
+  });
+
   if (history.length === 0) {
-    historyList.innerHTML = '<div class="history-empty">No analysis history yet.</div>';
+    historyList.innerHTML = '<div class="history-empty">' + (historySearchQuery ? 'No matching entries.' : 'No analysis history yet.') + '</div>';
     return;
   }
   historyList.innerHTML = '';
@@ -991,7 +1059,15 @@ function downloadFile(content, filename, type) {
 
 document.getElementById('export-json').addEventListener('click', function() {
   if (!currentData) return;
-  var json = JSON.stringify(currentData._raw || currentData, null, 2);
+  var raw = currentData._raw || currentData;
+  var exportObj = {
+    exported_at: new Date().toISOString(),
+    article_url: lastUrl || null,
+    article_title: currentData.title || 'Untitled',
+    personas: (currentData.personas || []).map(function(p) { return p.title; }),
+    analysis: raw
+  };
+  var json = JSON.stringify(exportObj, null, 2);
   var title = (currentData.title || 'analysis').replace(/[^a-z0-9]/gi, '_').substring(0, 40);
   downloadFile(json, title + '.json', 'application/json');
 });
@@ -1000,10 +1076,12 @@ document.getElementById('export-text').addEventListener('click', function() {
   if (!currentData) return;
   var lines = [];
   lines.push('Debiaser Analysis Report');
-  lines.push('='.repeat(40));
+  lines.push('='.repeat(60));
   lines.push('');
-  lines.push('Article: ' + currentData.title);
-  if (lastUrl) lines.push('Source: ' + lastUrl);
+  lines.push('Generated: ' + new Date().toLocaleString());
+  lines.push('Article:   ' + (currentData.title || 'Untitled'));
+  if (lastUrl) lines.push('URL:       ' + lastUrl);
+  lines.push('Personas:  ' + (currentData.personas || []).map(function(p) { return p.title; }).join(', '));
   lines.push('');
 
   if (currentData.debiaser.truth_seeking_summary) {
@@ -1018,8 +1096,10 @@ document.getElementById('export-text').addEventListener('click', function() {
   currentData.personas.forEach(function(p) {
     var stanceText = (p.stance_score >= 0 ? '+' : '') + p.stance_score.toFixed(1);
     var conf = Math.round((p.confidence || 0) * 100);
-    lines.push('-'.repeat(40));
-    lines.push(p.title + ' (Stance: ' + stanceText + ', Confidence: ' + conf + '%)');
+    lines.push('-'.repeat(60));
+    lines.push('PERSONA: ' + p.title);
+    lines.push('Stance: ' + stanceText + '  |  Confidence: ' + conf + '%');
+    lines.push('-'.repeat(60));
     lines.push('');
     lines.push(p.summary);
     lines.push('');
@@ -1043,7 +1123,10 @@ document.getElementById('export-text').addEventListener('click', function() {
   });
 
   if (currentData.debiaser.consensus_points && currentData.debiaser.consensus_points.length > 0) {
-    lines.push('='.repeat(40));
+    lines.push('='.repeat(60));
+    lines.push('SYNTHESIS');
+    lines.push('='.repeat(60));
+    lines.push('');
     lines.push('Consensus:');
     currentData.debiaser.consensus_points.forEach(function(c) { lines.push('  - ' + c); });
     lines.push('');
@@ -1081,6 +1164,32 @@ document.getElementById('share-link').addEventListener('click', function() {
   btn.textContent = 'Link Copied!';
   setTimeout(function() { btn.textContent = 'Share Link'; }, 2000);
 });
+
+// ── Bookmarklet Generator ──
+
+(function() {
+  var exportButtons = document.getElementById('export-buttons');
+  if (exportButtons) {
+    var bmBtn = document.createElement('button');
+    bmBtn.className = 'btn-export';
+    bmBtn.id = 'bookmarklet-btn';
+    bmBtn.title = 'Get bookmarklet for your browser';
+    bmBtn.textContent = 'Bookmarklet';
+    exportButtons.appendChild(bmBtn);
+
+    bmBtn.addEventListener('click', function() {
+      var bookmarkletUrl = "javascript:void(window.open('http://localhost:3000/?url='+encodeURIComponent(location.href)))";
+      window.prompt(
+        'Drag this link to your bookmarks bar, or copy the URL below and create a bookmark manually:\n\n' +
+        '1. Right-click your bookmarks bar\n' +
+        '2. Click "Add page" or "Add bookmark"\n' +
+        '3. Set the name to "Analyze in Debiaser"\n' +
+        '4. Paste the URL below into the URL/Address field',
+        bookmarkletUrl
+      );
+    });
+  }
+})();
 
 // ── API: Analyse URL ──
 

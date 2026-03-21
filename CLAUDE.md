@@ -13,14 +13,19 @@ cargo fmt --check    # Check formatting
 
 ## Key References
 
-- `REQUIREMENTS.md` — v3.0 full requirements specification
+- `REQUIREMENTS.md` — v4.0 full requirements specification
 - `references/debiaser_webapp_MVPprototype.jsx` — React/JSX prototype POC
 
 ## Project Status
 
 - Stage 1 (Core Analysis Engine): COMPLETE
 - Stage 2 (Web Interface & Deployment): COMPLETE
-- Stage 3: Awaiting Friendji review and direction
+- Stage 3 (Analysis Depth — Summarization, Tone/Framing, Source Credibility): COMPLETE
+- Stage 4 (UI Redesign — ijneb.dev Dark Theme): COMPLETE
+- Stage 5 (Multi-Provider LLM Chain, UX Polish): COMPLETE
+- Stage 6 (Production Hardening — Auth, HSTS, Validation): COMPLETE
+- Stage 7 (CI/CD Pipeline, Monitoring, Structured Logging): CLOSEOUT IN PROGRESS
+- Stage 8: Pending Stage 7 closeout
 
 ## Team
 
@@ -49,7 +54,7 @@ cargo fmt --check    # Check formatting
 
 ### RBAC & Least Privilege
 
-- **Workspace isolation is absolute** — agents may ONLY access `/Users/ijneb/Documents/PoliticalDebAIser`. No reading, writing, or referencing files in other project directories.
+- **Workspace isolation is absolute** — agents may ONLY access `/Users/ijneb/Documents/DEVELOPMENT/PoliticalDebAIser`. No reading, writing, or referencing files in other project directories.
 - **Principle of least privilege** — permissions must never exceed role requirements.
 - **Security agent (The Unnamed One the Adequate) is the access authority** — authorises access requests and escalation for temporary access.
 - **Cross-workspace access requires**: Security agent approval → Team lead request → Friendji sign-off. Time-limited, revoked after use.

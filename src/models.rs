@@ -227,6 +227,22 @@ pub struct ConfigResponse {
 pub const DEFAULT_CACHE_SIZE: usize = 100;
 /// Default max entries for analysis history store.
 pub const DEFAULT_STORE_SIZE: usize = 500;
+/// Default max entries for response cache.
+pub const DEFAULT_RESPONSE_CACHE_SIZE: usize = 200;
+/// Default TTL for response cache entries (1 hour).
+pub const DEFAULT_CACHE_TTL_SECS: u64 = 3600;
+/// Default timeout for LLM provider calls (30 seconds).
+pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 30;
+
+/// Cached analysis result with expiry tracking.
+#[derive(Debug, Clone)]
+pub struct CachedAnalysis {
+    pub result: AnalysisResult,
+    pub cached_at: Instant,
+}
+
+/// Response cache: URL hash -> CachedAnalysis (LRU-bounded).
+pub type ResponseCache = Arc<RwLock<LruCache<String, CachedAnalysis>>>;
 
 /// Shared article cache: URL -> ArticleContent (LRU-bounded).
 pub type ArticleCache = Arc<RwLock<LruCache<String, ArticleContent>>>;
@@ -239,17 +255,37 @@ pub type AnalysisStore = Arc<RwLock<LruCache<String, StoredAnalysis>>>;
 pub struct AppState {
     pub cache: ArticleCache,
     pub store: AnalysisStore,
+    /// Response cache: URL hash -> cached analysis result.
+    pub response_cache: ResponseCache,
+    /// TTL for response cache entries in seconds.
+    pub cache_ttl_secs: u64,
+    /// Timeout for LLM provider calls in seconds.
+    pub request_timeout_secs: u64,
     /// Monotonic server start time for uptime calculation.
     pub start_time: Arc<Instant>,
     /// Total HTTP requests served (incremented by middleware).
     pub total_requests: Arc<AtomicU64>,
     /// Total analyses completed (incremented after successful /analyze or /analyze-text).
     pub total_analyses: Arc<AtomicU64>,
+    /// Cache hit counter.
+    pub cache_hits: Arc<AtomicU64>,
+    /// Cache miss counter.
+    pub cache_misses: Arc<AtomicU64>,
 }
 
 impl AppState {
     /// Create a new AppState with configurable cache sizes.
     pub fn new(cache_size: usize, store_size: usize) -> Self {
+        let cache_ttl_secs: u64 = std::env::var("CACHE_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_CACHE_TTL_SECS);
+
+        let request_timeout_secs: u64 = std::env::var("REQUEST_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS);
+
         Self {
             cache: Arc::new(RwLock::new(LruCache::new(
                 NonZeroUsize::new(cache_size)
@@ -259,9 +295,22 @@ impl AppState {
                 NonZeroUsize::new(store_size)
                     .unwrap_or(NonZeroUsize::new(DEFAULT_STORE_SIZE).unwrap()),
             ))),
+            response_cache: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(
+                    std::env::var("RESPONSE_CACHE_SIZE")
+                        .ok()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(DEFAULT_RESPONSE_CACHE_SIZE),
+                )
+                .unwrap_or(NonZeroUsize::new(DEFAULT_RESPONSE_CACHE_SIZE).unwrap()),
+            ))),
+            cache_ttl_secs,
+            request_timeout_secs,
             start_time: Arc::new(Instant::now()),
             total_requests: Arc::new(AtomicU64::new(0)),
             total_analyses: Arc::new(AtomicU64::new(0)),
+            cache_hits: Arc::new(AtomicU64::new(0)),
+            cache_misses: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -273,6 +322,16 @@ impl AppState {
     /// Increment the total analyses counter.
     pub fn inc_analyses(&self) {
         self.total_analyses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the cache hit counter.
+    pub fn inc_cache_hits(&self) {
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the cache miss counter.
+    pub fn inc_cache_misses(&self) {
+        self.cache_misses.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Get server uptime in seconds.

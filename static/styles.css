@@ -1850,6 +1850,24 @@ footer {
   margin-top: 64px;
 }
 
+/* ── Focus-visible ── */
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: var(--cyan);
+}
+
 /* ── Responsive ── */
 
 @media (max-width: 640px) {
@@ -1901,5 +1919,154 @@ footer {
 
   .sidebar {
     width: 85vw;
+  }
+
+  .header-actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .container {
+    padding: 0 16px;
+  }
+
+  header {
+    padding: 32px 0 20px;
+    margin-bottom: 20px;
+  }
+
+  header h1 {
+    font-size: 1.35rem;
+  }
+
+  header p {
+    font-size: 0.82rem;
+  }
+
+  /* Input tabs: no overflow, wrap if needed */
+  .input-tabs {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .input-tab {
+    font-size: 0.65rem;
+    padding: 5px 10px;
+  }
+
+  /* Spectrum bar: tighter padding */
+  .spectrum-bar {
+    padding: 0.65rem;
+  }
+
+  .spectrum-labels {
+    font-size: 0.55rem;
+  }
+
+  /* 2D grid: shorter height */
+  .axis-grid {
+    height: 12rem;
+  }
+
+  .axis-label {
+    font-size: 0.55rem;
+  }
+
+  /* Persona cards: full width, smaller text */
+  .cluster-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .persona-card {
+    padding: 0.75rem;
+  }
+
+  .persona-title {
+    font-size: 0.85rem;
+  }
+
+  .persona-summary,
+  .persona-preview {
+    font-size: 0.78rem;
+  }
+
+  /* Debiaser grid single column */
+  .debiaser-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Settings modal: full width on small screens */
+  .settings-modal {
+    width: 95vw;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .settings-body {
+    padding: 0.75rem 1rem;
+  }
+
+  .settings-footer {
+    flex-wrap: wrap;
+  }
+
+  /* Compare columns stack */
+  .compare-columns {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .compare-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  /* Meter row wraps */
+  .meter-row {
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+
+  .meter-track {
+    width: 100%;
+    order: 3;
+  }
+
+  /* Panel header stacks */
+  .panel-header {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .panel {
+    padding: 0.75rem 1rem;
+  }
+
+  /* Sidebar full width */
+  .sidebar {
+    width: 100vw;
+  }
+
+  /* Tone grid stacks */
+  .tone-grid {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .tone-objectivity {
+    min-width: auto;
+  }
+
+  /* Skeleton grid single col */
+  .skeleton-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Footer tighter */
+  footer {
+    padding: 32px 0 28px;
+    margin-top: 40px;
   }
 }

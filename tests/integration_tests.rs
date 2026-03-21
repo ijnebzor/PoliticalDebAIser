@@ -113,6 +113,7 @@ fn app_with_state() -> Router {
             "/history",
             routing::get(routes::list_history).post(routes::store_analysis),
         )
+        .route("/history/search", routing::get(routes::search_history))
         .route(
             "/history/{id}",
             routing::get(routes::get_analysis).delete(routes::delete_history),
@@ -1084,6 +1085,7 @@ fn app_with_config() -> Router {
             "/history",
             routing::get(routes::list_history).post(routes::store_analysis),
         )
+        .route("/history/search", routing::get(routes::search_history))
         .route(
             "/history/{id}",
             routing::get(routes::get_analysis).delete(routes::delete_history),
@@ -1603,4 +1605,584 @@ async fn health_endpoint_rejects_post() {
         StatusCode::METHOD_NOT_ALLOWED,
         "POST to /health should be rejected"
     );
+}
+
+// =============================================================================
+// /history/search endpoint tests
+// =============================================================================
+
+/// GET /history/search with no query returns all entries.
+#[tokio::test]
+#[serial]
+async fn search_history_no_query_returns_all() {
+    let app = app_with_state();
+
+    // Store two analyses
+    let body1 = store_history_body("https://example.com/climate", "Climate Change Report");
+    let body2 = store_history_body("https://example.com/tax", "Tax Reform Analysis");
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body1))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body2))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Search with no query
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 2, "Empty query should return all entries");
+}
+
+/// GET /history/search?q=<term> filters by title (case-insensitive).
+#[tokio::test]
+#[serial]
+async fn search_history_filters_by_title() {
+    let app = app_with_state();
+
+    let body1 = store_history_body("https://example.com/climate", "Climate Change Report");
+    let body2 = store_history_body("https://example.com/tax", "Tax Reform Analysis");
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body1))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body2))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Search for "climate"
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search?q=climate")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 1, "Should match only the climate article");
+    assert_eq!(items[0]["article_title"], "Climate Change Report");
+}
+
+/// GET /history/search?q=<TERM> is case-insensitive.
+#[tokio::test]
+#[serial]
+async fn search_history_is_case_insensitive() {
+    let app = app_with_state();
+
+    let body = store_history_body("https://example.com/policy", "Healthcare Policy Debate");
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Search with uppercase
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search?q=HEALTHCARE")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 1, "Case-insensitive search should match");
+}
+
+/// GET /history/search?q=nonexistent returns empty array.
+#[tokio::test]
+#[serial]
+async fn search_history_no_match_returns_empty() {
+    let app = app_with_state();
+
+    let body = store_history_body("https://example.com/a", "Existing Article");
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search?q=zzzznotfound")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert!(items.is_empty(), "No-match query should return empty array");
+}
+
+/// GET /history/search returns results sorted by created_at descending.
+#[tokio::test]
+#[serial]
+async fn search_history_results_sorted_descending() {
+    let app = app_with_state();
+
+    let body1 = store_history_body("https://example.com/first", "First Article");
+    let body2 = store_history_body("https://example.com/second", "Second Article");
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body1))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Small delay to ensure different timestamps
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body2))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search?q=article")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 2);
+    // Most recent (Second) should be first
+    assert_eq!(items[0]["article_title"], "Second Article");
+    assert_eq!(items[1]["article_title"], "First Article");
+}
+
+/// Search response items contain required fields.
+#[tokio::test]
+#[serial]
+async fn search_history_response_has_required_fields() {
+    let app = app_with_state();
+
+    let body = store_history_body("https://example.com/fields", "Field Test Article");
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/history")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/history/search?q=field")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let items: Vec<serde_json::Value> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(items.len(), 1);
+
+    let item = &items[0];
+    assert!(item.get("id").is_some(), "id field must be present");
+    assert!(
+        item.get("article_title").is_some(),
+        "article_title field must be present"
+    );
+    assert!(
+        item.get("source_url").is_some(),
+        "source_url field must be present"
+    );
+    assert!(
+        item.get("created_at").is_some(),
+        "created_at field must be present"
+    );
+}
+
+// =============================================================================
+// Response cache and cache counter tests
+// =============================================================================
+
+/// Metrics endpoint must include response_cache_count field.
+#[tokio::test]
+async fn metrics_includes_response_cache_count() {
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    let rcc = json
+        .get("response_cache_count")
+        .expect("response_cache_count must be present");
+    assert!(rcc.is_number(), "response_cache_count must be numeric");
+    assert_eq!(rcc.as_u64().unwrap(), 0, "Should be 0 with no analyses");
+}
+
+/// Metrics endpoint must include cache_hit_count and cache_miss_count fields.
+#[tokio::test]
+async fn metrics_includes_cache_hit_miss_counters() {
+    let response = app_with_config()
+        .oneshot(
+            Request::builder()
+                .uri("/metrics")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    let hits = json
+        .get("cache_hit_count")
+        .expect("cache_hit_count must be present");
+    assert!(hits.is_number(), "cache_hit_count must be numeric");
+    assert_eq!(hits.as_u64().unwrap(), 0);
+
+    let misses = json
+        .get("cache_miss_count")
+        .expect("cache_miss_count must be present");
+    assert!(misses.is_number(), "cache_miss_count must be numeric");
+    assert_eq!(misses.as_u64().unwrap(), 0);
+}
+
+// =============================================================================
+// CachedAnalysis and ResponseCache unit tests (in models)
+// =============================================================================
+
+/// CachedAnalysis tracks cached_at timestamp correctly.
+#[tokio::test]
+async fn cached_analysis_tracks_instant() {
+    use political_debaiser::models::CachedAnalysis;
+    use std::time::Instant;
+
+    let result = AnalysisResult {
+        title: "Cached Test".to_string(),
+        source_url: Some("https://example.com/cached".to_string()),
+        personas: vec![],
+        debiaser: DebiasedSummary {
+            consensus_points: vec![],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "Cached.".to_string(),
+            spectrum_score: 0.0,
+            spectrum_explain: "N/A".to_string(),
+        },
+        tone_analysis: None,
+        source_meta: None,
+        warnings: vec![],
+    };
+
+    let before = Instant::now();
+    let cached = CachedAnalysis {
+        result: result.clone(),
+        cached_at: Instant::now(),
+    };
+
+    // cached_at should be very recent
+    assert!(
+        cached.cached_at.elapsed().as_millis() < 100,
+        "cached_at should be within 100ms of creation"
+    );
+    assert!(
+        cached.cached_at >= before,
+        "cached_at should be after the before timestamp"
+    );
+}
+
+/// Response cache stores and retrieves entries correctly.
+#[tokio::test]
+async fn response_cache_store_and_retrieve() {
+    use lru::LruCache;
+    use political_debaiser::models::{CachedAnalysis, ResponseCache};
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+    use std::time::Instant;
+    use tokio::sync::RwLock;
+
+    let cache: ResponseCache = Arc::new(RwLock::new(LruCache::new(NonZeroUsize::new(10).unwrap())));
+
+    let result = AnalysisResult {
+        title: "Cache Test".to_string(),
+        source_url: Some("https://example.com".to_string()),
+        personas: vec![],
+        debiaser: DebiasedSummary {
+            consensus_points: vec![],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "Test.".to_string(),
+            spectrum_score: 0.0,
+            spectrum_explain: "N/A".to_string(),
+        },
+        tone_analysis: None,
+        source_meta: None,
+        warnings: vec![],
+    };
+
+    let key = "test_key_abc123".to_string();
+    {
+        let mut c = cache.write().await;
+        c.put(
+            key.clone(),
+            CachedAnalysis {
+                result: result.clone(),
+                cached_at: Instant::now(),
+            },
+        );
+    }
+
+    let mut c = cache.write().await;
+    assert!(c.contains(&key), "Cache should contain the key");
+    let cached = c.get(&key).unwrap();
+    assert_eq!(cached.result.title, "Cache Test");
+}
+
+/// Response cache TTL expiry logic: entries older than TTL should be considered stale.
+#[tokio::test]
+async fn response_cache_ttl_expiry() {
+    use political_debaiser::models::CachedAnalysis;
+    use std::time::Instant;
+
+    let result = AnalysisResult {
+        title: "TTL Test".to_string(),
+        source_url: None,
+        personas: vec![],
+        debiaser: DebiasedSummary {
+            consensus_points: vec![],
+            disagreements: vec![],
+            likely_bias_drivers: vec![],
+            truth_seeking_summary: "TTL.".to_string(),
+            spectrum_score: 0.0,
+            spectrum_explain: "N/A".to_string(),
+        },
+        tone_analysis: None,
+        source_meta: None,
+        warnings: vec![],
+    };
+
+    // Simulate an entry cached 2 seconds ago
+    let cached = CachedAnalysis {
+        result,
+        cached_at: Instant::now() - std::time::Duration::from_secs(2),
+    };
+
+    // With a 1-second TTL, this entry should be stale
+    let ttl_secs: u64 = 1;
+    let is_valid = cached.cached_at.elapsed().as_secs() < ttl_secs;
+    assert!(!is_valid, "Entry older than TTL should be considered stale");
+
+    // With a 10-second TTL, this entry should still be valid
+    let ttl_secs: u64 = 10;
+    let is_valid = cached.cached_at.elapsed().as_secs() < ttl_secs;
+    assert!(is_valid, "Entry within TTL should be considered valid");
+}
+
+/// Different URLs produce different cache keys (no collisions for distinct URLs).
+#[test]
+fn url_cache_keys_differ_for_different_urls() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn url_cache_key(url: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        url.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    let key1 = url_cache_key("https://example.com/article-1");
+    let key2 = url_cache_key("https://example.com/article-2");
+    let key3 = url_cache_key("https://other.com/article-1");
+
+    assert_ne!(key1, key2, "Different URLs should produce different keys");
+    assert_ne!(
+        key1, key3,
+        "Different domains should produce different keys"
+    );
+    assert_ne!(key2, key3, "All three keys should be distinct");
+}
+
+/// Same URL always produces the same cache key (deterministic).
+#[test]
+fn url_cache_key_is_deterministic() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn url_cache_key(url: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        url.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    let url = "https://example.com/consistent";
+    let key1 = url_cache_key(url);
+    let key2 = url_cache_key(url);
+    assert_eq!(key1, key2, "Same URL must produce same cache key");
+}
+
+/// Cache key format is 16 hex characters.
+#[test]
+fn url_cache_key_format() {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    fn url_cache_key(url: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        url.hash(&mut hasher);
+        format!("{:016x}", hasher.finish())
+    }
+
+    let key = url_cache_key("https://example.com");
+    assert_eq!(key.len(), 16, "Cache key should be 16 chars");
+    assert!(
+        key.chars().all(|c| c.is_ascii_hexdigit()),
+        "Cache key should be hex only"
+    );
+}
+
+/// AppState initializes cache counters at zero.
+#[test]
+fn app_state_counters_start_at_zero() {
+    use political_debaiser::models::AppState;
+    use std::sync::atomic::Ordering;
+
+    let state = AppState::new(10, 10);
+    assert_eq!(state.cache_hits.load(Ordering::Relaxed), 0);
+    assert_eq!(state.cache_misses.load(Ordering::Relaxed), 0);
+    assert_eq!(state.total_requests.load(Ordering::Relaxed), 0);
+    assert_eq!(state.total_analyses.load(Ordering::Relaxed), 0);
+}
+
+/// AppState inc_cache_hits and inc_cache_misses increment correctly.
+#[test]
+fn app_state_cache_counters_increment() {
+    use political_debaiser::models::AppState;
+    use std::sync::atomic::Ordering;
+
+    let state = AppState::new(10, 10);
+    state.inc_cache_hits();
+    state.inc_cache_hits();
+    state.inc_cache_misses();
+
+    assert_eq!(state.cache_hits.load(Ordering::Relaxed), 2);
+    assert_eq!(state.cache_misses.load(Ordering::Relaxed), 1);
+}
+
+/// Response cache is initially empty in new AppState.
+#[tokio::test]
+async fn app_state_response_cache_initially_empty() {
+    use political_debaiser::models::AppState;
+
+    let state = AppState::new(10, 10);
+    let cache = state.response_cache.read().await;
+    assert!(cache.is_empty(), "Response cache should start empty");
 }

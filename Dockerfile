@@ -1,7 +1,7 @@
 # =============================================================================
 # Stage 1: Builder — compile the Rust binary in a full toolchain image
 # =============================================================================
-FROM rust:1.85-slim-bookworm AS builder
+FROM rust:1.83-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -53,6 +53,7 @@ USER appuser
 ENV OLLAMA_URL=http://host.docker.internal:11434
 ENV OLLAMA_MODEL=llama3.2
 ENV RUST_LOG=info
+ENV LOG_FORMAT=text
 
 EXPOSE 3000
 
