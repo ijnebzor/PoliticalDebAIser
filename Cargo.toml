@@ -22,6 +22,7 @@ regex = "1"
 uuid = { version = "1", features = ["v4"] }
 lru = "0.16.3"
 tower_governor = { version = "0.8", features = ["axum"] }
+subtle = "2.6.1"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

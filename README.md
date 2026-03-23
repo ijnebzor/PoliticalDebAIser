@@ -22,7 +22,7 @@ Built with Rust/Axum, powered by local or cloud LLM inference.
 - **Rate Limiting** — Per-IP rate limiting on analysis endpoints
 - **Security Hardened** — OWASP Top 10 compliant, SSRF protection, CSP, HSTS, XSS prevention
 - **Docker Support** — Multi-stage Dockerfile with docker-compose
-- **CI/CD** — GitHub Actions pipeline (fmt, clippy, build, test)
+- **CI/CD** — GitHub Actions pipeline (fmt, clippy, build, test, security audit, coverage, Docker validation)
 
 ## Screenshots
 
@@ -79,6 +79,9 @@ cargo fmt --check    # Check formatting
 | `CORS_ORIGIN` | `http://localhost:3000` | Allowed CORS origin |
 | `CACHE_SIZE` | `100` | Max cached articles |
 | `STORE_SIZE` | `1000` | Max stored analysis results |
+| `RESPONSE_CACHE_SIZE` | `200` | Max cached analysis responses |
+| `CACHE_TTL_SECS` | `3600` | Response cache TTL in seconds |
+| `RATE_LIMIT_RPM` | `60` | Per-IP rate limit (requests per minute) on analysis endpoints |
 
 Create a `.env` file in the project root to set these, or pass them as environment variables.
 
@@ -93,6 +96,7 @@ Create a `.env` file in the project root to set these, or pass them as environme
 | `GET` | `/history` | List stored analyses |
 | `POST` | `/history` | Store an analysis result. Returns `{id, share_url}` |
 | `GET` | `/history/{id}` | Retrieve a stored analysis |
+| `GET` | `/history/search?q=` | Search history by title (case-insensitive substring) |
 | `DELETE` | `/history/{id}` | Delete a stored analysis (requires auth) |
 | `GET` | `/config` | Get runtime configuration (requires auth) |
 | `POST` | `/config` | Update runtime configuration (requires auth) |
@@ -116,8 +120,10 @@ static/
 └── styles.css       # Dark theme UI (ijneb.dev design language)
 
 tests/
-├── integration_tests.rs  # 34 integration tests
-└── e2e_tests.rs          # 52 E2E tests (security + feature coverage)
+├── integration_tests.rs     # Integration tests
+├── e2e_tests.rs             # E2E tests (security + feature coverage)
+├── consistency_tests.rs     # Cross-provider consistency tests
+└── llm_provider_tests.rs    # Provider-specific tests
 ```
 
 ## Tech Stack
@@ -131,6 +137,16 @@ tests/
 - **Frontend:** Vanilla HTML/CSS/JS (no framework)
 - **Containerization:** Docker + docker-compose
 - **CI/CD:** GitHub Actions
+
+## CI/CD Pipeline
+
+The GitHub Actions pipeline runs on every push and PR to master:
+
+| Job | Steps | Purpose |
+|-----|-------|---------|
+| **ci** | `cargo fmt --check`, `cargo clippy`, `cargo build`, `cargo test`, `cargo audit` | Code quality, correctness, and dependency CVE scanning |
+| **coverage** | `cargo tarpaulin` | Test coverage reporting (uploaded as artifact) |
+| **docker** | Docker Buildx build | Validates container builds successfully |
 
 ## Contributing
 

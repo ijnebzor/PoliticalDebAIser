@@ -443,6 +443,15 @@ pub async fn get_analysis(
     })
 }
 
+/// Constant-time byte comparison to prevent timing attacks on token validation.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    if a.len() != b.len() {
+        return false;
+    }
+    a.ct_eq(b).into()
+}
+
 /// Check bearer token authentication against CONFIG_AUTH_TOKEN env var.
 /// Returns Ok(()) if authenticated, or an ApiError if not.
 fn check_config_auth(headers: &HeaderMap) -> Result<(), ApiError> {
@@ -463,7 +472,7 @@ fn check_config_auth(headers: &HeaderMap) -> Result<(), ApiError> {
         .unwrap_or("");
 
     if let Some(token) = auth_header.strip_prefix("Bearer ")
-        && token == expected
+        && constant_time_eq(token.as_bytes(), expected.as_bytes())
     {
         return Ok(());
     }

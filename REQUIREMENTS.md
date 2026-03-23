@@ -108,6 +108,8 @@ The system analyzes content through 8 political persona lenses:
 - **T-037:** `GET /history` — List all stored analyses
 - **T-038:** `GET /history/:id` — Retrieve stored analysis by ID
 - **T-039:** `DELETE /history/:id` — Remove stored analysis
+- **T-039a:** `GET /history/search?q=<query>` — Search history entries by title (case-insensitive substring match) *(Stage 7 Tier 2)*
+- **T-039b:** `GET /metrics` — Operational metrics endpoint (total requests, analyses, cache count, uptime) *(Stage 7)*
 
 ### 3.5 Frontend
 - **T-040:** Single-page application (HTML/CSS/JS, no React — vanilla JS)
@@ -288,3 +290,4 @@ SUMMARY_THRESHOLD=4000              # Article char limit before summarization
 | 2026-02-18 | 3.0 | Major redesign: 8 personas, stance scoring, fact-checking, 2D axes, debiaser synthesis, per Friendji prototype |
 | 2026-02-25 | 3.1 | Stage 3: Article summarization, tone/framing analysis, source credibility, 35-pub database |
 | 2026-03-03 | 4.0 | Stage 5 complete: Multi-provider LLM chain (Groq/Gemini/HF/Ollama), round-robin + fallback, temperature=0, expanded persona prompts, expandable cards UI. Stage 6 scope added. |
+| 2026-03-23 | 4.1 | Stage 7 Tier 2: Added /history/search endpoint (T-039a), /metrics endpoint (T-039b), response caching with bounded LruCache, response compression, Docker production profile with resource limits, per-IP rate limiting. |
