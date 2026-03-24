@@ -18,6 +18,7 @@ Thumbs.db
 # Claude Code / tooling
 .claude/
 .project-kit/
+.meridian/
 
 # Docker local overrides
 docker-compose.override.yml

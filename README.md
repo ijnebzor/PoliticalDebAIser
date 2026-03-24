@@ -6,6 +6,13 @@ Multi-perspective political news analysis tool. Paste a URL or article text, and
 
 Built with Rust/Axum, powered by local or cloud LLM inference.
 
+## Beta Testing — Known Limitations
+
+- **In-memory storage** — Analysis history is stored in memory. Restarting the server clears all saved analyses.
+- **LLM provider required** — At least one LLM provider must be configured (Ollama locally, or Groq/Gemini/HuggingFace via API key). The app will not analyze articles without a working provider.
+- **No user accounts** — There is no authentication for end users. The `CONFIG_AUTH_TOKEN` protects admin endpoints only.
+- **Rate limiting** — Analysis endpoints are rate-limited to 60 requests per minute per IP (configurable via `RATE_LIMIT_RPM`).
+
 ## Features
 
 - **8 Political Personas** — Progressive Activist, Liberal Social Democrat, Centrist Technocrat, Libertarian Civil Liberties, Conservative Fiscal, National Security Hawk, Environmentalist Green, Populist Anti-Elite
